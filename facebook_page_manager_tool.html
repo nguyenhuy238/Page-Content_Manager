@@ -1,0 +1,664 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-sans); background: transparent; }
+
+  .app { display: flex; flex-direction: column; gap: 0; min-height: 700px; }
+
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 0.5px solid var(--color-border-tertiary);
+    background: var(--color-background-primary);
+    border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+  }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 28px; height: 28px; background: #1877F2; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+  .logo span { color: #fff; font-weight: 700; font-size: 16px; line-height: 1; }
+  .app-title { font-size: 15px; font-weight: 500; color: var(--color-text-primary); }
+  .app-sub { font-size: 12px; color: var(--color-text-secondary); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 5px; }
+
+  .nav {
+    display: flex; gap: 0;
+    border-bottom: 0.5px solid var(--color-border-tertiary);
+    background: var(--color-background-primary);
+    padding: 0 1.25rem;
+  }
+  .nav-btn {
+    padding: 10px 14px; font-size: 13px; background: none; border: none;
+    border-bottom: 2px solid transparent; cursor: pointer;
+    color: var(--color-text-secondary); font-family: var(--font-sans);
+    font-weight: 400; transition: all 0.15s;
+  }
+  .nav-btn:hover { color: var(--color-text-primary); }
+  .nav-btn.active { color: #1877F2; border-bottom-color: #1877F2; font-weight: 500; }
+
+  .main { display: flex; gap: 0; flex: 1; background: var(--color-background-tertiary); }
+
+  .panel {
+    flex: 1; padding: 1.25rem;
+    display: flex; flex-direction: column; gap: 1rem;
+  }
+
+  .card {
+    background: var(--color-background-primary);
+    border: 0.5px solid var(--color-border-tertiary);
+    border-radius: var(--border-radius-lg);
+    padding: 1rem 1.25rem;
+  }
+
+  .card-title {
+    font-size: 13px; font-weight: 500; color: var(--color-text-secondary);
+    margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
+  .source-list { display: flex; flex-direction: column; gap: 6px; }
+  .source-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: var(--border-radius-md);
+    background: var(--color-background-secondary);
+    font-size: 13px; color: var(--color-text-primary);
+  }
+  .source-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+  .source-dot.off { background: var(--color-border-primary); }
+  .source-badge {
+    margin-left: auto; font-size: 11px; padding: 2px 7px;
+    border-radius: 99px; background: var(--color-background-info);
+    color: var(--color-text-info);
+  }
+
+  .fetch-btn {
+    width: 100%; padding: 9px; font-size: 13px; font-weight: 500;
+    background: #1877F2; color: #fff; border: none; border-radius: var(--border-radius-md);
+    cursor: pointer; font-family: var(--font-sans); margin-top: 4px;
+    transition: opacity 0.15s;
+  }
+  .fetch-btn:hover { opacity: 0.88; }
+  .fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .articles-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+  .article-item {
+    padding: 10px 12px; border-radius: var(--border-radius-md);
+    background: var(--color-background-secondary);
+    cursor: pointer; transition: all 0.12s;
+    border: 1.5px solid transparent;
+  }
+  .article-item:hover { border-color: #1877F2; }
+  .article-item.selected { border-color: #1877F2; background: var(--color-background-info); }
+  .article-item-title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 3px; line-height: 1.4; }
+  .article-item-meta { font-size: 11px; color: var(--color-text-secondary); }
+
+  .right-panel { width: 320px; flex-shrink: 0; padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+
+  .ai-area { min-height: 180px; font-size: 13px; color: var(--color-text-primary); line-height: 1.7; padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); white-space: pre-wrap; border: 0.5px solid var(--color-border-tertiary); }
+  .ai-placeholder { color: var(--color-text-tertiary); font-style: italic; }
+
+  .tone-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+  .tone-chip {
+    padding: 4px 10px; border-radius: 99px; font-size: 12px;
+    border: 0.5px solid var(--color-border-secondary); background: none;
+    cursor: pointer; font-family: var(--font-sans); color: var(--color-text-secondary);
+    transition: all 0.12s;
+  }
+  .tone-chip.active { background: #1877F2; border-color: #1877F2; color: #fff; }
+
+  .schedule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .time-chip {
+    padding: 6px 8px; text-align: center; font-size: 12px;
+    border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary);
+    cursor: pointer; background: none; font-family: var(--font-sans);
+    color: var(--color-text-secondary); transition: all 0.12s;
+  }
+  .time-chip.active { background: var(--color-background-info); border-color: #1877F2; color: var(--color-text-info); }
+
+  .post-btn {
+    width: 100%; padding: 10px; font-size: 13px; font-weight: 500;
+    background: #42b883; color: #fff; border: none; border-radius: var(--border-radius-md);
+    cursor: pointer; font-family: var(--font-sans); transition: opacity 0.15s;
+  }
+  .post-btn:hover { opacity: 0.88; }
+  .post-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .queue-list { display: flex; flex-direction: column; gap: 6px; }
+  .queue-item {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: var(--color-background-secondary); border-radius: var(--border-radius-md);
+    font-size: 12px;
+  }
+  .queue-time { font-weight: 500; color: var(--color-text-info); min-width: 42px; }
+  .queue-text { color: var(--color-text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .queue-status { font-size: 11px; padding: 2px 7px; border-radius: 99px; }
+  .queue-status.done { background: var(--color-background-success); color: var(--color-text-success); }
+  .queue-status.wait { background: var(--color-background-warning); color: var(--color-text-warning); }
+  .queue-status.sched { background: var(--color-background-secondary); color: var(--color-text-secondary); border: 0.5px solid var(--color-border-secondary); }
+
+  .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat-box { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 10px; text-align: center; }
+  .stat-num { font-size: 20px; font-weight: 500; color: var(--color-text-primary); }
+  .stat-lbl { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; }
+
+  .loading-spin {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+    vertical-align: middle; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: flex; gap: 0; flex: 1; }
+
+  .prompt-textarea {
+    width: 100%; min-height: 90px; font-size: 13px; font-family: var(--font-mono);
+    padding: 10px; border-radius: var(--border-radius-md);
+    border: 0.5px solid var(--color-border-secondary); resize: vertical;
+    background: var(--color-background-secondary); color: var(--color-text-primary);
+    line-height: 1.6;
+  }
+  .prompt-textarea:focus { outline: none; border-color: #1877F2; }
+
+  .label { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 4px; }
+
+  select {
+    width: 100%; font-size: 13px; padding: 7px 10px;
+    border: 0.5px solid var(--color-border-secondary);
+    border-radius: var(--border-radius-md);
+    background: var(--color-background-secondary); color: var(--color-text-primary);
+    font-family: var(--font-sans); cursor: pointer;
+  }
+</style>
+
+<div class="app">
+  <div class="header">
+    <div class="header-left">
+      <div class="logo"><span>f</span></div>
+      <div>
+        <div class="app-title">Page Content Manager</div>
+        <div class="app-sub">AI-powered · Facebook Graph API</div>
+      </div>
+    </div>
+    <div style="font-size: 12px; color: var(--color-text-secondary);">
+      <span class="status-dot"></span>Claude AI sẵn sàng
+    </div>
+  </div>
+
+  <div class="nav">
+    <button class="nav-btn active" onclick="switchTab('collect')">Thu thập tin</button>
+    <button class="nav-btn" onclick="switchTab('generate')">Tạo nội dung</button>
+    <button class="nav-btn" onclick="switchTab('schedule')">Lịch đăng</button>
+    <button class="nav-btn" onclick="switchTab('stats')">Thống kê</button>
+    <button class="nav-btn" onclick="switchTab('setup')">Cấu hình</button>
+  </div>
+
+  <div class="main" style="flex:1;">
+
+    <!-- TAB 1: THU THẬP TIN -->
+    <div class="tab-content active" id="tab-collect" style="width:100%;">
+      <div class="panel">
+        <div class="card">
+          <div class="card-title">Nguồn tin tức</div>
+          <div class="source-list">
+            <div class="source-item"><span class="source-dot"></span>VnExpress Công nghệ (RSS)<span class="source-badge">RSS</span></div>
+            <div class="source-item"><span class="source-dot"></span>Genk.vn<span class="source-badge">RSS</span></div>
+            <div class="source-item"><span class="source-dot"></span>TechCrunch<span class="source-badge">RSS</span></div>
+            <div class="source-item"><span class="source-dot off"></span>NewsAPI (cần key)<span class="source-badge" style="background:var(--color-background-warning);color:var(--color-text-warning)">API</span></div>
+            <div class="source-item"><span class="source-dot off"></span>The Verge<span class="source-badge" style="background:var(--color-background-secondary);color:var(--color-text-secondary)">tắt</span></div>
+          </div>
+          <button class="fetch-btn" id="fetch-btn" onclick="fetchArticles()">Tải bài mới nhất</button>
+        </div>
+
+        <div class="card" style="flex:1;">
+          <div class="card-title">Bài vừa thu thập <span id="article-count" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+          <div class="articles-list" id="articles-list">
+            <div style="color:var(--color-text-tertiary);font-size:13px;padding:1rem 0;text-align:center">Nhấn "Tải bài mới nhất" để bắt đầu</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-panel">
+        <div class="card">
+          <div class="card-title">Xem trước bài gốc</div>
+          <div id="preview-box" style="font-size:13px;color:var(--color-text-secondary);min-height:80px;line-height:1.7">
+            Chọn một bài để xem nội dung tóm tắt...
+          </div>
+          <div id="source-link" style="margin-top:8px;display:none">
+            <a id="source-url" href="#" style="font-size:12px;color:var(--color-text-info)">Xem bài gốc</a>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Tùy chỉnh AI</div>
+          <div class="label">Giọng văn</div>
+          <div class="tone-row">
+            <button class="tone-chip active" onclick="setTone(this,'hài hước')">Hài hước</button>
+            <button class="tone-chip" onclick="setTone(this,'chuyên nghiệp')">Chuyên nghiệp</button>
+            <button class="tone-chip" onclick="setTone(this,'giật tít')">Giật tít</button>
+            <button class="tone-chip" onclick="setTone(this,'chia sẻ cá nhân')">Cá nhân</button>
+          </div>
+          <div class="label" style="margin-top:10px">Niche page</div>
+          <select id="niche-select">
+            <option>Công nghệ & AI</option>
+            <option>Kinh doanh & Khởi nghiệp</option>
+            <option>Sức khỏe & Fitness</option>
+            <option>Game & Giải trí</option>
+            <option>Tài chính cá nhân</option>
+          </select>
+          <button class="fetch-btn" style="margin-top:10px;background:var(--color-background-info);color:var(--color-text-info);border:1px solid #1877F2" 
+            onclick="sendPrompt('Tôi muốn tùy chỉnh thêm prompt AI để viết caption Facebook — hãy hướng dẫn tôi')">
+            Tùy chỉnh Prompt nâng cao ↗
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: TẠO NỘI DUNG -->
+    <div class="tab-content" id="tab-generate" style="width:100%;">
+      <div class="panel">
+        <div class="card">
+          <div class="card-title">Bài đang xử lý</div>
+          <div id="gen-article-title" style="font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:6px">Chưa chọn bài nào</div>
+          <div id="gen-article-src" style="font-size:12px;color:var(--color-text-secondary)">Quay lại tab "Thu thập tin" để chọn bài</div>
+        </div>
+        <div class="card" style="flex:1;">
+          <div class="card-title">Prompt gửi cho AI</div>
+          <textarea class="prompt-textarea" id="main-prompt" readonly>Chưa có bài nào được chọn. Hãy chọn một bài từ tab "Thu thập tin" trước.</textarea>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="fetch-btn" id="gen-btn" onclick="generateContent()" disabled>
+            Tạo Caption với AI
+          </button>
+          <button class="fetch-btn" style="background:var(--color-background-secondary);color:var(--color-text-primary);border:0.5px solid var(--color-border-secondary)" onclick="sendPrompt('Hướng dẫn tôi cách tối ưu prompt để AI viết caption Facebook viral hơn')">
+            Tối ưu Prompt ↗
+          </button>
+        </div>
+      </div>
+      <div class="right-panel">
+        <div class="card" style="flex:1;">
+          <div class="card-title">Kết quả AI</div>
+          <div class="ai-area" id="ai-output">
+            <span class="ai-placeholder">Kết quả sẽ hiển thị ở đây sau khi nhấn "Tạo Caption với AI"...</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:10px;">
+            <button onclick="copyCaption()" style="flex:1;padding:7px;font-size:12px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-secondary);background:none;cursor:pointer;font-family:var(--font-sans);color:var(--color-text-secondary)">
+              Sao chép
+            </button>
+            <button onclick="addToQueue()" style="flex:2;padding:7px;font-size:12px;border-radius:var(--border-radius-md);border:none;background:#1877F2;color:#fff;cursor:pointer;font-family:var(--font-sans);font-weight:500">
+              Thêm vào hàng đợi
+            </button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Kiểm tra nhanh</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div class="source-item" id="check-length">
+              <span id="check-len-dot" class="source-dot off"></span>
+              <span style="font-size:12px">Độ dài phù hợp (100–300 từ)</span>
+            </div>
+            <div class="source-item" id="check-emoji">
+              <span id="check-emoji-dot" class="source-dot off"></span>
+              <span style="font-size:12px">Có emoji</span>
+            </div>
+            <div class="source-item" id="check-cta">
+              <span id="check-cta-dot" class="source-dot off"></span>
+              <span style="font-size:12px">Có câu kêu gọi (CTA)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: LỊCH ĐĂNG -->
+    <div class="tab-content" id="tab-schedule" style="width:100%;">
+      <div class="panel">
+        <div class="card">
+          <div class="card-title">Chọn khung giờ đăng</div>
+          <div class="schedule-grid">
+            <button class="time-chip active" onclick="toggleTime(this)">07:00 sáng</button>
+            <button class="time-chip" onclick="toggleTime(this)">08:30 sáng</button>
+            <button class="time-chip active" onclick="toggleTime(this)">11:30 trưa</button>
+            <button class="time-chip" onclick="toggleTime(this)">13:00 chiều</button>
+            <button class="time-chip" onclick="toggleTime(this)">17:00 chiều</button>
+            <button class="time-chip active" onclick="toggleTime(this)">20:00 tối</button>
+            <button class="time-chip" onclick="toggleTime(this)">21:30 tối</button>
+            <button class="time-chip" onclick="toggleTime(this)">22:00 tối</button>
+          </div>
+          <div style="font-size:12px;color:var(--color-text-secondary);margin-top:10px">
+            Đang chọn 3 khung / ngày · Tần suất tối ưu: 3–5 bài/ngày
+          </div>
+        </div>
+        <div class="card" style="flex:1">
+          <div class="card-title">Hàng đợi bài chờ đăng</div>
+          <div class="queue-list" id="queue-list">
+            <div class="queue-item">
+              <span class="queue-time">07:00</span>
+              <span class="queue-text">5 xu hướng AI đang thay đổi ngành lập trình...</span>
+              <span class="queue-status done">Đã đăng</span>
+            </div>
+            <div class="queue-item">
+              <span class="queue-time">11:30</span>
+              <span class="queue-text">ChatGPT vừa ra tính năng mới cực hot...</span>
+              <span class="queue-status wait">Đang chờ</span>
+            </div>
+            <div class="queue-item">
+              <span class="queue-time">20:00</span>
+              <span class="queue-text">Bài mới từ AI...</span>
+              <span class="queue-status sched">Đã lên lịch</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="right-panel">
+        <div class="card">
+          <div class="card-title">Đăng thủ công ngay</div>
+          <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px;line-height:1.6">
+            Đăng bài vừa tạo lên Page ngay lập tức thay vì lên lịch.
+          </div>
+          <button class="post-btn" id="post-now-btn" disabled onclick="postNow()">
+            Đăng lên Facebook ngay
+          </button>
+          <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:8px;text-align:center">
+            Cần nhập Page ID + Access Token trong tab Cấu hình
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Tình trạng hôm nay</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary)">
+              <span style="color:var(--color-text-secondary)">Bài đã đăng</span>
+              <span style="font-weight:500;color:var(--color-text-success)" id="posted-count">1 / 3</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary)">
+              <span style="color:var(--color-text-secondary)">Trong hàng đợi</span>
+              <span style="font-weight:500" id="queue-count">2 bài</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0">
+              <span style="color:var(--color-text-secondary)">Bài tiếp theo</span>
+              <span style="font-weight:500;color:var(--color-text-info)">20:00 hôm nay</span>
+            </div>
+          </div>
+        </div>
+        <button class="fetch-btn" style="background:none;border:0.5px solid var(--color-border-secondary);color:var(--color-text-primary)" onclick="sendPrompt('Hướng dẫn tôi deploy scheduler Python chạy 24/7 trên VPS Ubuntu để tự động đăng bài Facebook')">
+          Hướng dẫn deploy 24/7 ↗
+        </button>
+      </div>
+    </div>
+
+    <!-- TAB 4: THỐNG KÊ -->
+    <div class="tab-content" id="tab-stats" style="width:100%;">
+      <div class="panel">
+        <div class="stat-row">
+          <div class="stat-box"><div class="stat-num" style="color:#1877F2">24</div><div class="stat-lbl">Bài đã đăng</div></div>
+          <div class="stat-box"><div class="stat-num" style="color:#22c55e">8.4k</div><div class="stat-lbl">Lượt reach</div></div>
+          <div class="stat-box"><div class="stat-num" style="color:#f59e0b">312</div><div class="stat-lbl">Engagement</div></div>
+        </div>
+        <div class="card" style="flex:1">
+          <div class="card-title">Hiệu quả theo giờ đăng</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+              <span style="min-width:60px;color:var(--color-text-secondary)">07:00</span>
+              <div style="flex:1;height:8px;background:var(--color-background-secondary);border-radius:4px;overflow:hidden">
+                <div style="width:82%;height:100%;background:#1877F2;border-radius:4px"></div>
+              </div>
+              <span style="min-width:35px;text-align:right;font-weight:500">82%</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+              <span style="min-width:60px;color:var(--color-text-secondary)">11:30</span>
+              <div style="flex:1;height:8px;background:var(--color-background-secondary);border-radius:4px;overflow:hidden">
+                <div style="width:65%;height:100%;background:#1877F2;border-radius:4px"></div>
+              </div>
+              <span style="min-width:35px;text-align:right;font-weight:500">65%</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+              <span style="min-width:60px;color:var(--color-text-secondary)">20:00</span>
+              <div style="flex:1;height:8px;background:var(--color-background-secondary);border-radius:4px;overflow:hidden">
+                <div style="width:91%;height:100%;background:#22c55e;border-radius:4px"></div>
+              </div>
+              <span style="min-width:35px;text-align:right;font-weight:500;color:var(--color-text-success)">91%</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Top nội dung tuần này</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:13px;padding:7px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">
+              <div style="font-weight:500">5 tính năng AI bạn chưa biết của ChatGPT</div>
+              <div style="font-size:11px;color:var(--color-text-secondary);margin-top:3px">1,240 reach · 87 engagement · 20:00</div>
+            </div>
+            <div style="font-size:13px;padding:7px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">
+              <div style="font-weight:500">Lập trình viên cần học gì để không bị AI thay thế?</div>
+              <div style="font-size:11px;color:var(--color-text-secondary);margin-top:3px">980 reach · 64 engagement · 07:00</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="right-panel">
+        <div class="card">
+          <div class="card-title">Nguồn tạo ra nhiều reach nhất</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary)">
+              <span>VnExpress</span><span style="font-weight:500;color:var(--color-text-info)">3,400 reach</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary)">
+              <span>TechCrunch</span><span style="font-weight:500;color:var(--color-text-info)">2,800 reach</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:5px 0">
+              <span>Genk.vn</span><span style="font-weight:500;color:var(--color-text-info)">2,200 reach</span>
+            </div>
+          </div>
+        </div>
+        <button class="fetch-btn" style="background:none;border:0.5px solid var(--color-border-secondary);color:var(--color-text-primary)" onclick="sendPrompt('Hướng dẫn tôi kết nối Facebook Insights API để lấy dữ liệu reach và engagement tự động về dashboard này')">
+          Kết nối Facebook Insights ↗
+        </button>
+      </div>
+    </div>
+
+    <!-- TAB 5: CẤU HÌNH -->
+    <div class="tab-content" id="tab-setup" style="width:100%;">
+      <div class="panel">
+        <div class="card">
+          <div class="card-title">Facebook API</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div>
+              <div class="label">Page ID</div>
+              <input type="text" placeholder="VD: 123456789012345" id="page-id-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+            </div>
+            <div>
+              <div class="label">Page Access Token (Long-lived)</div>
+              <input type="password" placeholder="EAAxxxxxxx..." id="token-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Claude API</div>
+          <div>
+            <div class="label">API Key (từ console.anthropic.com)</div>
+            <input type="password" placeholder="sk-ant-api..." id="claude-key-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+          </div>
+        </div>
+        <button class="fetch-btn" onclick="saveConfig()">Lưu cấu hình</button>
+        <div class="card">
+          <div class="card-title">Hướng dẫn nhanh</div>
+          <div style="font-size:13px;color:var(--color-text-secondary);line-height:1.7">
+            1. Vào <strong style="color:var(--color-text-primary)">developers.facebook.com</strong> → tạo App<br>
+            2. Graph API Explorer → chọn Page → cấp quyền <code style="background:var(--color-background-secondary);padding:1px 5px;border-radius:4px;font-size:12px">pages_manage_posts</code><br>
+            3. Generate → Exchange lấy Long-lived Token (60 ngày)<br>
+            4. Vào <strong style="color:var(--color-text-primary)">console.anthropic.com</strong> → API Keys → tạo key mới
+          </div>
+          <button class="fetch-btn" style="margin-top:10px;background:none;border:0.5px solid var(--color-border-secondary);color:var(--color-text-primary)" onclick="sendPrompt('Hướng dẫn từng bước chi tiết cách lấy Facebook Page Access Token Long-lived và tích hợp vào Python script')">
+            Hướng dẫn chi tiết ↗
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const MOCK_ARTICLES = [
+  { title: "Meta ra mắt AI mới cạnh tranh trực tiếp với GPT-4o", source: "TechCrunch", time: "2 giờ trước", summary: "Meta vừa công bố Llama 4 với khả năng xử lý đa phương thức vượt trội, có thể phân tích hình ảnh, video và văn bản cùng lúc. Mô hình này được training trên 10 nghìn tỷ token...", url: "https://techcrunch.com" },
+  { title: "5 xu hướng lập trình AI mà sinh viên IT cần biết năm 2025", source: "VnExpress", time: "4 giờ trước", summary: "Các chuyên gia công nghệ dự đoán AI agents, RAG, fine-tuning sẽ là kỹ năng hot nhất trong năm 2025. Sinh viên IT cần nắm vững Python, LangChain và các nền tảng cloud...", url: "https://vnexpress.net" },
+  { title: "ChatGPT thêm tính năng tạo video từ văn bản", source: "Genk.vn", time: "5 giờ trước", summary: "OpenAI tích hợp Sora vào ChatGPT Plus, cho phép người dùng tạo video HD 60 giây từ mô tả văn bản. Tính năng này đang được triển khai dần cho người dùng trả phí...", url: "https://genk.vn" },
+  { title: "Startup Việt Nam nhận đầu tư 5 triệu USD để phát triển AI cho y tế", source: "ICTNews", time: "6 giờ trước", summary: "MedAI Vietnam vừa công bố vòng Series A với sự tham gia của các quỹ đầu tư từ Singapore và Mỹ. Startup này đang xây dựng AI chẩn đoán hình ảnh y tế...", url: "https://ictnews.vn" },
+];
+
+let selectedArticle = null;
+let generatedCaption = "";
+let currentTone = "hài hước";
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function setTone(el, tone) {
+  document.querySelectorAll('.tone-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  currentTone = tone;
+  if (selectedArticle) buildPrompt();
+}
+
+function toggleTime(el) {
+  el.classList.toggle('active');
+}
+
+function fetchArticles() {
+  const btn = document.getElementById('fetch-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spin"></span>Đang tải...';
+  
+  setTimeout(() => {
+    const list = document.getElementById('articles-list');
+    list.innerHTML = '';
+    MOCK_ARTICLES.forEach((a, i) => {
+      const item = document.createElement('div');
+      item.className = 'article-item';
+      item.innerHTML = `<div class="article-item-title">${a.title}</div><div class="article-item-meta">${a.source} · ${a.time}</div>`;
+      item.onclick = () => selectArticle(i);
+      list.appendChild(item);
+    });
+    document.getElementById('article-count').textContent = `· ${MOCK_ARTICLES.length} bài`;
+    btn.disabled = false;
+    btn.innerHTML = 'Tải lại';
+  }, 1400);
+}
+
+function selectArticle(idx) {
+  selectedArticle = MOCK_ARTICLES[idx];
+  document.querySelectorAll('.article-item').forEach((el, i) => {
+    el.classList.toggle('selected', i === idx);
+  });
+  document.getElementById('preview-box').innerHTML = `<strong style="color:var(--color-text-primary)">${selectedArticle.title}</strong><br><br>${selectedArticle.summary}`;
+  document.getElementById('source-link').style.display = 'block';
+  document.getElementById('source-url').href = selectedArticle.url;
+  document.getElementById('source-url').textContent = `Nguồn: ${selectedArticle.source}`;
+  
+  document.getElementById('gen-article-title').textContent = selectedArticle.title;
+  document.getElementById('gen-article-src').textContent = `Nguồn: ${selectedArticle.source} · ${selectedArticle.time}`;
+  document.getElementById('gen-btn').disabled = false;
+  buildPrompt();
+}
+
+function buildPrompt() {
+  if (!selectedArticle) return;
+  const niche = document.getElementById('niche-select').value;
+  const prompt = `Bạn là biên tập viên mạng xã hội chuyên quản lý page Facebook về chủ đề "${niche}".
+
+NHIỆM VỤ: Viết lại bài tin tức sau thành một post Facebook hấp dẫn.
+
+PHONG CÁCH: ${currentTone}
+
+BÀI GỐC:
+Tiêu đề: ${selectedArticle.title}
+Tóm tắt: ${selectedArticle.summary}
+Nguồn: ${selectedArticle.source}
+
+YÊU CẦU OUTPUT:
+- Dài 150-250 từ
+- Câu đầu phải gây tò mò (hook)
+- Dùng 3-5 emoji phù hợp
+- Kết thúc bằng câu hỏi mời comment
+- KHÔNG copy nguyên văn bản gốc
+- Thêm dòng: "Nguồn: ${selectedArticle.source}" ở cuối`;
+  
+  document.getElementById('main-prompt').value = prompt;
+}
+
+async function generateContent() {
+  if (!selectedArticle) return;
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spin"></span>AI đang viết...';
+  
+  const outputEl = document.getElementById('ai-output');
+  outputEl.innerHTML = '<span class="ai-placeholder">AI đang tạo nội dung...</span>';
+  
+  ['check-len-dot','check-emoji-dot','check-cta-dot'].forEach(id => {
+    document.getElementById(id).className = 'source-dot off';
+  });
+
+  const prompt = document.getElementById('main-prompt').value;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+    const data = await response.json();
+    generatedCaption = data.content[0].text;
+    outputEl.textContent = generatedCaption;
+    
+    const wordCount = generatedCaption.split(/\s+/).length;
+    const hasEmoji = /[\u{1F300}-\u{1FFFF}]/u.test(generatedCaption);
+    const hasCTA = /\?|bạn nghĩ|bình luận|comment|share|chia sẻ/i.test(generatedCaption);
+    
+    document.getElementById('check-len-dot').className = 'source-dot' + (wordCount >= 100 && wordCount <= 350 ? '' : ' off');
+    document.getElementById('check-emoji-dot').className = 'source-dot' + (hasEmoji ? '' : ' off');
+    document.getElementById('check-cta-dot').className = 'source-dot' + (hasCTA ? '' : ' off');
+    
+  } catch(e) {
+    outputEl.innerHTML = '<span style="color:var(--color-text-danger)">Lỗi kết nối API. Kiểm tra lại API Key trong tab Cấu hình.</span>';
+  }
+  
+  btn.disabled = false;
+  btn.innerHTML = 'Tạo lại Caption';
+}
+
+function copyCaption() {
+  if (!generatedCaption) return;
+  navigator.clipboard.writeText(generatedCaption);
+  event.target.textContent = 'Đã sao chép!';
+  setTimeout(() => { event.target.textContent = 'Sao chép'; }, 1500);
+}
+
+function addToQueue() {
+  if (!generatedCaption) return;
+  const list = document.getElementById('queue-list');
+  const item = document.createElement('div');
+  item.className = 'queue-item';
+  item.innerHTML = `<span class="queue-time">20:00</span><span class="queue-text">${generatedCaption.substring(0,50)}...</span><span class="queue-status sched">Đã lên lịch</span>`;
+  list.appendChild(item);
+  document.getElementById('queue-count').textContent = list.children.length - 1 + ' bài';
+  alert('Đã thêm vào hàng đợi! Chuyển sang tab Lịch đăng để xem.');
+}
+
+function postNow() {
+  sendPrompt('Tôi muốn tích hợp Facebook Graph API để đăng bài tự động từ Python — hướng dẫn code đầy đủ');
+}
+
+function saveConfig() {
+  const pageId = document.getElementById('page-id-input').value;
+  const token = document.getElementById('token-input').value;
+  if (pageId && token) {
+    document.getElementById('post-now-btn').disabled = false;
+  }
+  alert('Đã lưu cấu hình!');
+}
+</script>
