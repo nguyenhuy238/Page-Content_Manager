@@ -1,0 +1,1053 @@
+
+<style>
+  :root {
+    --font-sans: "Segoe UI", Tahoma, Arial, sans-serif;
+    --font-mono: "Consolas", "Courier New", monospace;
+    --color-background-primary: #ffffff;
+    --color-background-secondary: #f5f7fb;
+    --color-background-tertiary: #eef2f8;
+    --color-background-info: #eaf3ff;
+    --color-background-success: #eafaf1;
+    --color-background-warning: #fff8e8;
+    --color-background-danger: #ffeef0;
+    --color-text-primary: #0f172a;
+    --color-text-secondary: #475569;
+    --color-text-tertiary: #94a3b8;
+    --color-text-info: #1d4ed8;
+    --color-text-success: #15803d;
+    --color-text-warning: #b45309;
+    --color-text-danger: #b91c1c;
+    --color-border-primary: #cbd5e1;
+    --color-border-secondary: #d6deeb;
+    --color-border-tertiary: #e2e8f0;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-sans); background: transparent; }
+
+  .app { display: flex; flex-direction: column; gap: 0; min-height: 700px; }
+
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 0.5px solid var(--color-border-tertiary);
+    background: var(--color-background-primary);
+    border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+  }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 28px; height: 28px; background: #1877F2; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+  .logo span { color: #fff; font-weight: 700; font-size: 16px; line-height: 1; }
+  .app-title { font-size: 15px; font-weight: 500; color: var(--color-text-primary); }
+  .app-sub { font-size: 12px; color: var(--color-text-secondary); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 5px; }
+
+  .nav {
+    display: flex; gap: 0;
+    border-bottom: 0.5px solid var(--color-border-tertiary);
+    background: var(--color-background-primary);
+    padding: 0 1.25rem;
+  }
+  .nav-btn {
+    padding: 10px 14px; font-size: 13px; background: none; border: none;
+    border-bottom: 2px solid transparent; cursor: pointer;
+    color: var(--color-text-secondary); font-family: var(--font-sans);
+    font-weight: 400; transition: all 0.15s;
+  }
+  .nav-btn:hover { color: var(--color-text-primary); }
+  .nav-btn.active { color: #1877F2; border-bottom-color: #1877F2; font-weight: 500; }
+
+  .main { display: flex; gap: 0; flex: 1; background: var(--color-background-tertiary); }
+
+  .panel {
+    flex: 1; padding: 1.25rem;
+    display: flex; flex-direction: column; gap: 1rem;
+  }
+
+  .card {
+    background: var(--color-background-primary);
+    border: 0.5px solid var(--color-border-tertiary);
+    border-radius: var(--border-radius-lg);
+    padding: 1rem 1.25rem;
+  }
+
+  .card-title {
+    font-size: 13px; font-weight: 500; color: var(--color-text-secondary);
+    margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
+  .source-list { display: flex; flex-direction: column; gap: 6px; }
+  .source-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: var(--border-radius-md);
+    background: var(--color-background-secondary);
+    font-size: 13px; color: var(--color-text-primary);
+  }
+  .source-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
+  .source-dot.off { background: var(--color-border-primary); }
+  .source-badge {
+    margin-left: auto; font-size: 11px; padding: 2px 7px;
+    border-radius: 99px; background: var(--color-background-info);
+    color: var(--color-text-info);
+  }
+
+  .fetch-btn {
+    width: 100%; padding: 9px; font-size: 13px; font-weight: 500;
+    background: #1877F2; color: #fff; border: none; border-radius: var(--border-radius-md);
+    cursor: pointer; font-family: var(--font-sans); margin-top: 4px;
+    transition: opacity 0.15s;
+  }
+  .fetch-btn:hover { opacity: 0.88; }
+  .fetch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .articles-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+  .article-item {
+    padding: 10px 12px; border-radius: var(--border-radius-md);
+    background: var(--color-background-secondary);
+    cursor: pointer; transition: all 0.12s;
+    border: 1.5px solid transparent;
+  }
+  .article-item:hover { border-color: #1877F2; }
+  .article-item.selected { border-color: #1877F2; background: var(--color-background-info); }
+  .article-item-title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 3px; line-height: 1.4; }
+  .article-item-meta { font-size: 11px; color: var(--color-text-secondary); }
+
+  .right-panel { width: 320px; flex-shrink: 0; padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+
+  .ai-area { min-height: 180px; font-size: 13px; color: var(--color-text-primary); line-height: 1.7; padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); white-space: pre-wrap; border: 0.5px solid var(--color-border-tertiary); }
+  .ai-placeholder { color: var(--color-text-tertiary); font-style: italic; }
+
+  .tone-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+  .tone-chip {
+    padding: 4px 10px; border-radius: 99px; font-size: 12px;
+    border: 0.5px solid var(--color-border-secondary); background: none;
+    cursor: pointer; font-family: var(--font-sans); color: var(--color-text-secondary);
+    transition: all 0.12s;
+  }
+  .tone-chip.active { background: #1877F2; border-color: #1877F2; color: #fff; }
+
+  .schedule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .time-chip {
+    padding: 6px 8px; text-align: center; font-size: 12px;
+    border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary);
+    cursor: pointer; background: none; font-family: var(--font-sans);
+    color: var(--color-text-secondary); transition: all 0.12s;
+  }
+  .time-chip.active { background: var(--color-background-info); border-color: #1877F2; color: var(--color-text-info); }
+
+  .post-btn {
+    width: 100%; padding: 10px; font-size: 13px; font-weight: 500;
+    background: #42b883; color: #fff; border: none; border-radius: var(--border-radius-md);
+    cursor: pointer; font-family: var(--font-sans); transition: opacity 0.15s;
+  }
+  .post-btn:hover { opacity: 0.88; }
+  .post-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .queue-list { display: flex; flex-direction: column; gap: 6px; }
+  .queue-item {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: var(--color-background-secondary); border-radius: var(--border-radius-md);
+    font-size: 12px;
+  }
+  .queue-time { font-weight: 500; color: var(--color-text-info); min-width: 42px; }
+  .queue-text { color: var(--color-text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .queue-status { font-size: 11px; padding: 2px 7px; border-radius: 99px; }
+  .queue-status.done { background: var(--color-background-success); color: var(--color-text-success); }
+  .queue-status.wait { background: var(--color-background-warning); color: var(--color-text-warning); }
+  .queue-status.sched { background: var(--color-background-secondary); color: var(--color-text-secondary); border: 0.5px solid var(--color-border-secondary); }
+
+  .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat-box { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 10px; text-align: center; }
+  .stat-num { font-size: 20px; font-weight: 500; color: var(--color-text-primary); }
+  .stat-lbl { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; }
+
+  .loading-spin {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+    vertical-align: middle; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: flex; gap: 0; flex: 1; }
+
+  .prompt-textarea {
+    width: 100%; min-height: 90px; font-size: 13px; font-family: var(--font-mono);
+    padding: 10px; border-radius: var(--border-radius-md);
+    border: 0.5px solid var(--color-border-secondary); resize: vertical;
+    background: var(--color-background-secondary); color: var(--color-text-primary);
+    line-height: 1.6;
+  }
+  .prompt-textarea:focus { outline: none; border-color: #1877F2; }
+
+  .label { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 4px; }
+
+  select {
+    width: 100%; font-size: 13px; padding: 7px 10px;
+    border: 0.5px solid var(--color-border-secondary);
+    border-radius: var(--border-radius-md);
+    background: var(--color-background-secondary); color: var(--color-text-primary);
+    font-family: var(--font-sans); cursor: pointer;
+  }
+
+  .queue-status.fail { background: var(--color-background-danger); color: var(--color-text-danger); }
+
+  .toast-wrap {
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 320px;
+  }
+  .toast {
+    font-size: 12px;
+    line-height: 1.45;
+    padding: 9px 11px;
+    border-radius: 8px;
+    border: 0.5px solid transparent;
+    background: var(--color-background-primary);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+    animation: fadeIn 0.18s ease;
+  }
+  .toast.success { border-color: #86efac; color: #166534; background: #f0fdf4; }
+  .toast.error { border-color: #fecaca; color: #991b1b; background: #fef2f2; }
+  .toast.info { border-color: #bfdbfe; color: #1e3a8a; background: #eff6ff; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+
+<div class="app">
+  <div class="header">
+    <div class="header-left">
+      <div class="logo"><span>f</span></div>
+      <div>
+        <div class="app-title">Page Content Manager</div>
+        <div class="app-sub">AI-powered · Facebook Graph API</div>
+      </div>
+    </div>
+    <div style="font-size: 12px; color: var(--color-text-secondary);">
+      <span class="status-dot" id="app-status-dot"></span><span id="app-status-text">Đang kiểm tra kết nối...</span>
+    </div>
+  </div>
+
+  <div class="nav">
+    <button class="nav-btn active" onclick="switchTab('collect')">Thu thập tin</button>
+    <button class="nav-btn" onclick="switchTab('generate')">Tạo nội dung</button>
+    <button class="nav-btn" onclick="switchTab('schedule')">Lịch đăng</button>
+    <button class="nav-btn" onclick="switchTab('stats')">Thống kê</button>
+    <button class="nav-btn" onclick="switchTab('setup')">Cấu hình</button>
+  </div>
+
+  <div class="main" style="flex:1;">
+
+    <!-- TAB 1: THU THẬP TIN -->
+    <div class="tab-content active" id="tab-collect" style="width:100%;">
+      <div class="panel">
+        <div class="card">
+          <div class="card-title">Nguồn tin tức</div>
+          <div class="source-list">
+            <div class="source-item"><span class="source-dot"></span>VnExpress Công nghệ (RSS)<span class="source-badge">RSS</span></div>
+            <div class="source-item"><span class="source-dot"></span>Genk.vn<span class="source-badge">RSS</span></div>
+            <div class="source-item"><span class="source-dot"></span>TechCrunch<span class="source-badge">RSS</span></div>
+            <div class="source-item"><span class="source-dot off"></span>NewsAPI (cần key)<span class="source-badge" style="background:var(--color-background-warning);color:var(--color-text-warning)">API</span></div>
+            <div class="source-item"><span class="source-dot off"></span>The Verge<span class="source-badge" style="background:var(--color-background-secondary);color:var(--color-text-secondary)">tắt</span></div>
+          </div>
+          <button class="fetch-btn" id="fetch-btn" onclick="fetchArticles()">Tải bài mới nhất</button>
+        </div>
+
+        <div class="card" style="flex:1;">
+          <div class="card-title">Bài vừa thu thập <span id="article-count" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+          <div class="articles-list" id="articles-list">
+            <div style="color:var(--color-text-tertiary);font-size:13px;padding:1rem 0;text-align:center">Nhấn "Tải bài mới nhất" để bắt đầu</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-panel">
+        <div class="card">
+          <div class="card-title">Xem trước bài gốc</div>
+          <div id="preview-box" style="font-size:13px;color:var(--color-text-secondary);min-height:80px;line-height:1.7">
+            Chọn một bài để xem nội dung tóm tắt...
+          </div>
+          <div id="source-link" style="margin-top:8px;display:none">
+            <a id="source-url" href="#" style="font-size:12px;color:var(--color-text-info)">Xem bài gốc</a>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Tùy chỉnh AI</div>
+          <div class="label">Giọng văn</div>
+          <div class="tone-row">
+            <button class="tone-chip active" onclick="setTone(this,'hài hước')">Hài hước</button>
+            <button class="tone-chip" onclick="setTone(this,'chuyên nghiệp')">Chuyên nghiệp</button>
+            <button class="tone-chip" onclick="setTone(this,'giật tít')">Giật tít</button>
+            <button class="tone-chip" onclick="setTone(this,'chia sẻ cá nhân')">Cá nhân</button>
+          </div>
+          <div class="label" style="margin-top:10px">Niche page</div>
+          <select id="niche-select">
+            <option>Công nghệ & AI</option>
+            <option>Kinh doanh & Khởi nghiệp</option>
+            <option>Sức khỏe & Fitness</option>
+            <option>Game & Giải trí</option>
+            <option>Tài chính cá nhân</option>
+          </select>
+          <button class="fetch-btn" style="margin-top:10px;background:var(--color-background-info);color:var(--color-text-info);border:1px solid #1877F2" 
+            onclick="sendPrompt('Tôi muốn tùy chỉnh thêm prompt AI để viết caption Facebook — hãy hướng dẫn tôi')">
+            Tùy chỉnh Prompt nâng cao ↗
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: TẠO NỘI DUNG -->
+    <div class="tab-content" id="tab-generate" style="width:100%;">
+      <div class="panel">
+        <div class="card">
+          <div class="card-title">Bài đang xử lý</div>
+          <div id="gen-article-title" style="font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:6px">Chưa chọn bài nào</div>
+          <div id="gen-article-src" style="font-size:12px;color:var(--color-text-secondary)">Quay lại tab "Thu thập tin" để chọn bài</div>
+        </div>
+        <div class="card" style="flex:1;">
+          <div class="card-title">Prompt gửi cho AI</div>
+          <textarea class="prompt-textarea" id="main-prompt" readonly>Chưa có bài nào được chọn. Hãy chọn một bài từ tab "Thu thập tin" trước.</textarea>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="fetch-btn" id="gen-btn" onclick="generateContent()" disabled>
+            Tạo Caption với AI
+          </button>
+          <button class="fetch-btn" style="background:var(--color-background-secondary);color:var(--color-text-primary);border:0.5px solid var(--color-border-secondary)" onclick="sendPrompt('Hướng dẫn tôi cách tối ưu prompt để AI viết caption Facebook viral hơn')">
+            Tối ưu Prompt ↗
+          </button>
+        </div>
+      </div>
+      <div class="right-panel">
+        <div class="card" style="flex:1;">
+          <div class="card-title">Kết quả AI</div>
+          <div class="ai-area" id="ai-output">
+            <span class="ai-placeholder">Kết quả sẽ hiển thị ở đây sau khi nhấn "Tạo Caption với AI"...</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:10px;">
+            <button onclick="copyCaption()" style="flex:1;padding:7px;font-size:12px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-secondary);background:none;cursor:pointer;font-family:var(--font-sans);color:var(--color-text-secondary)">
+              Sao chép
+            </button>
+            <button onclick="addToQueue()" style="flex:2;padding:7px;font-size:12px;border-radius:var(--border-radius-md);border:none;background:#1877F2;color:#fff;cursor:pointer;font-family:var(--font-sans);font-weight:500">
+              Thêm vào hàng đợi
+            </button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Kiểm tra nhanh</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div class="source-item" id="check-length">
+              <span id="check-len-dot" class="source-dot off"></span>
+              <span style="font-size:12px">Độ dài phù hợp (100–300 từ)</span>
+            </div>
+            <div class="source-item" id="check-emoji">
+              <span id="check-emoji-dot" class="source-dot off"></span>
+              <span style="font-size:12px">Có emoji</span>
+            </div>
+            <div class="source-item" id="check-cta">
+              <span id="check-cta-dot" class="source-dot off"></span>
+              <span style="font-size:12px">Có câu kêu gọi (CTA)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: LỊCH ĐĂNG -->
+    <div class="tab-content" id="tab-schedule" style="width:100%;">
+      <div class="panel">
+        <div class="card">
+          <div class="card-title">Chọn khung giờ đăng</div>
+          <div class="schedule-grid">
+            <button class="time-chip active" onclick="toggleTime(this)">07:00 sáng</button>
+            <button class="time-chip" onclick="toggleTime(this)">08:30 sáng</button>
+            <button class="time-chip active" onclick="toggleTime(this)">11:30 trưa</button>
+            <button class="time-chip" onclick="toggleTime(this)">13:00 chiều</button>
+            <button class="time-chip" onclick="toggleTime(this)">17:00 chiều</button>
+            <button class="time-chip active" onclick="toggleTime(this)">20:00 tối</button>
+            <button class="time-chip" onclick="toggleTime(this)">21:30 tối</button>
+            <button class="time-chip" onclick="toggleTime(this)">22:00 tối</button>
+          </div>
+          <div style="font-size:12px;color:var(--color-text-secondary);margin-top:10px">
+            Đang chọn 3 khung / ngày · Tần suất tối ưu: 3–5 bài/ngày
+          </div>
+        </div>
+        <div class="card" style="flex:1">
+          <div class="card-title">Hàng đợi bài chờ đăng</div>
+          <div class="queue-list" id="queue-list">
+            <div class="queue-item">
+              <span class="queue-time">07:00</span>
+              <span class="queue-text">5 xu hướng AI đang thay đổi ngành lập trình...</span>
+              <span class="queue-status done">Đã đăng</span>
+            </div>
+            <div class="queue-item">
+              <span class="queue-time">11:30</span>
+              <span class="queue-text">ChatGPT vừa ra tính năng mới cực hot...</span>
+              <span class="queue-status wait">Đang chờ</span>
+            </div>
+            <div class="queue-item">
+              <span class="queue-time">20:00</span>
+              <span class="queue-text">Bài mới từ AI...</span>
+              <span class="queue-status sched">Đã lên lịch</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="right-panel">
+        <div class="card">
+          <div class="card-title">Đăng thủ công ngay</div>
+          <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px;line-height:1.6">
+            Đăng bài vừa tạo lên Page ngay lập tức thay vì lên lịch.
+          </div>
+          <button class="post-btn" id="post-now-btn" disabled onclick="postNow()">
+            Đăng lên Facebook ngay
+          </button>
+          <div style="font-size:11px;color:var(--color-text-tertiary);margin-top:8px;text-align:center">
+            Cần nhập Page ID + Access Token trong tab Cấu hình
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Tình trạng hôm nay</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary)">
+              <span style="color:var(--color-text-secondary)">Bài đã đăng</span>
+              <span style="font-weight:500;color:var(--color-text-success)" id="posted-count">1 / 3</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary)">
+              <span style="color:var(--color-text-secondary)">Trong hàng đợi</span>
+              <span style="font-weight:500" id="queue-count">2 bài</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0">
+              <span style="color:var(--color-text-secondary)">Bài tiếp theo</span>
+              <span style="font-weight:500;color:var(--color-text-info)" id="next-post-time">--</span>
+            </div>
+          </div>
+        </div>
+        <button class="fetch-btn" style="background:none;border:0.5px solid var(--color-border-secondary);color:var(--color-text-primary)" onclick="sendPrompt('Hướng dẫn tôi deploy scheduler Python chạy 24/7 trên VPS Ubuntu để tự động đăng bài Facebook')">
+          Hướng dẫn deploy 24/7 ↗
+        </button>
+      </div>
+    </div>
+
+    <!-- TAB 4: THỐNG KÊ -->
+    <div class="tab-content" id="tab-stats" style="width:100%;">
+      <div class="panel">
+        <div class="stat-row">
+          <div class="stat-box"><div class="stat-num" style="color:#1877F2" id="stat-posted">0</div><div class="stat-lbl">Bài đã đăng</div></div>
+          <div class="stat-box"><div class="stat-num" style="color:#22c55e" id="stat-reach">0</div><div class="stat-lbl">Lượt reach</div></div>
+          <div class="stat-box"><div class="stat-num" style="color:#f59e0b" id="stat-engagement">0</div><div class="stat-lbl">Engagement</div></div>
+        </div>
+        <div class="card" style="flex:1">
+          <div class="card-title">Hiệu quả theo giờ đăng</div>
+          <div style="display:flex;flex-direction:column;gap:6px;" id="hourly-performance-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Top nội dung tuần này</div>
+          <div style="display:flex;flex-direction:column;gap:6px" id="top-posts-list"></div>
+        </div>
+      </div>
+      <div class="right-panel">
+        <div class="card">
+          <div class="card-title">Nguồn tạo ra nhiều reach nhất</div>
+          <div style="display:flex;flex-direction:column;gap:6px;" id="top-sources-list"></div>
+        </div>
+        <button class="fetch-btn" style="background:none;border:0.5px solid var(--color-border-secondary);color:var(--color-text-primary)" onclick="sendPrompt('Hướng dẫn tôi kết nối Facebook Insights API để lấy dữ liệu reach và engagement tự động về dashboard này')">
+          Kết nối Facebook Insights ↗
+        </button>
+      </div>
+    </div>
+
+    <!-- TAB 5: CẤU HÌNH -->
+    <div class="tab-content" id="tab-setup" style="width:100%;">
+      <div class="panel">
+        <div class="card">
+          <div class="card-title">Facebook API</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div>
+              <div class="label">Page ID</div>
+              <input type="text" placeholder="VD: 123456789012345" id="page-id-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+            </div>
+            <div>
+              <div class="label">Page Access Token (Long-lived)</div>
+              <input type="password" placeholder="EAAxxxxxxx..." id="token-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Claude API</div>
+          <div>
+            <div class="label">API Key (từ console.anthropic.com)</div>
+            <input type="password" placeholder="sk-ant-api..." id="claude-key-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+          </div>
+        </div>
+        <button class="fetch-btn" onclick="saveConfig()">Lưu cấu hình</button>
+        <div class="card">
+          <div class="card-title">Hướng dẫn nhanh</div>
+          <div style="font-size:13px;color:var(--color-text-secondary);line-height:1.7">
+            1. Vào <strong style="color:var(--color-text-primary)">developers.facebook.com</strong> → tạo App<br>
+            2. Graph API Explorer → chọn Page → cấp quyền <code style="background:var(--color-background-secondary);padding:1px 5px;border-radius:4px;font-size:12px">pages_manage_posts</code><br>
+            3. Generate → Exchange lấy Long-lived Token (60 ngày)<br>
+            4. Vào <strong style="color:var(--color-text-primary)">console.anthropic.com</strong> → API Keys → tạo key mới
+          </div>
+          <button class="fetch-btn" style="margin-top:10px;background:none;border:0.5px solid var(--color-border-secondary);color:var(--color-text-primary)" onclick="sendPrompt('Hướng dẫn từng bước chi tiết cách lấy Facebook Page Access Token Long-lived và tích hợp vào Python script')">
+            Hướng dẫn chi tiết ↗
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+<script>
+const state = {
+  articles: [],
+  selectedArticle: null,
+  generatedCaption: "",
+  currentTone: "hài hước",
+  queue: [],
+  queueToday: { posted_count: 0, pending_count: 0, next_scheduled_for: null },
+  stats: null,
+};
+
+function showToast(message, type = "info") {
+  const wrap = document.getElementById("toast-wrap");
+  if (!wrap) return;
+
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  wrap.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(-4px)";
+    toast.style.transition = "all .2s";
+    setTimeout(() => toast.remove(), 220);
+  }, 3000);
+}
+
+function setHeaderStatus(ok, text) {
+  const dot = document.getElementById("app-status-dot");
+  const label = document.getElementById("app-status-text");
+  if (!dot || !label) return;
+  dot.style.background = ok ? "#22c55e" : "#ef4444";
+  label.textContent = text;
+}
+
+function buttonLoading(button, loading, loadingText, normalText) {
+  if (!button) return;
+  if (loading) {
+    button.disabled = true;
+    button.innerHTML = `<span class="loading-spin"></span>${loadingText}`;
+    return;
+  }
+  button.disabled = false;
+  button.innerHTML = normalText;
+}
+
+async function apiFetch(url, options = {}) {
+  const opts = {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+    ...options,
+  };
+
+  const response = await fetch(url, opts);
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_) {
+    payload = null;
+  }
+
+  if (!response.ok || !payload || payload.ok !== true) {
+    const message = payload?.error || `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return payload.data;
+}
+
+function switchTab(tab) {
+  document.querySelectorAll(".tab-content").forEach((t) => t.classList.remove("active"));
+  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
+
+  const tabEl = document.getElementById("tab-" + tab);
+  if (tabEl) tabEl.classList.add("active");
+
+  const navBtn = document.querySelector(`.nav-btn[onclick="switchTab('${tab}')"]`);
+  if (navBtn) navBtn.classList.add("active");
+
+  if (tab === "schedule") {
+    loadQueue();
+  } else if (tab === "stats") {
+    loadStats();
+  } else if (tab === "setup") {
+    loadConfigStatus();
+  }
+}
+
+function setTone(el, tone) {
+  document.querySelectorAll(".tone-chip").forEach((c) => c.classList.remove("active"));
+  el.classList.add("active");
+  state.currentTone = tone;
+  if (state.selectedArticle) buildPrompt();
+}
+
+function toggleTime(el) {
+  el.classList.toggle("active");
+}
+
+function formatTimeFromIso(isoString) {
+  if (!isoString) return "--";
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatRelative(isoString) {
+  if (!isoString) return "vừa xong";
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "vừa xong";
+
+  const diffMinutes = Math.max(1, Math.round((Date.now() - date.getTime()) / 60000));
+  if (diffMinutes < 60) return `${diffMinutes} phút trước`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} giờ trước`;
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays} ngày trước`;
+}
+
+function renderArticles() {
+  const list = document.getElementById("articles-list");
+  const count = document.getElementById("article-count");
+
+  if (!state.articles.length) {
+    list.innerHTML = '<div style="color:var(--color-text-tertiary);font-size:13px;padding:1rem 0;text-align:center">Chưa có bài mới từ nguồn RSS/API</div>';
+    count.textContent = "";
+    return;
+  }
+
+  list.innerHTML = "";
+  state.articles.forEach((a, i) => {
+    const item = document.createElement("div");
+    item.className = "article-item" + (state.selectedArticle?.id === a.id ? " selected" : "");
+    item.innerHTML = `<div class="article-item-title">${a.title}</div><div class="article-item-meta">${a.source} · ${formatRelative(a.published_at || a.created_at)}</div>`;
+    item.onclick = () => selectArticle(i);
+    list.appendChild(item);
+  });
+
+  count.textContent = `· ${state.articles.length} bài`;
+}
+
+async function fetchArticles() {
+  const btn = document.getElementById("fetch-btn");
+  const list = document.getElementById("articles-list");
+
+  buttonLoading(btn, true, "Đang tải...", "Tải lại");
+  list.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;padding:1rem 0;text-align:center"><span class="loading-spin" style="border-top-color:#1877F2;border-color:rgba(24,119,242,0.2)"></span>Đang thu thập dữ liệu...</div>';
+
+  try {
+    const articles = await apiFetch("/api/articles");
+    state.articles = Array.isArray(articles) ? articles : [];
+    state.selectedArticle = null;
+    renderArticles();
+    resetSelectedArticleUI();
+    showToast(`Đã thu thập ${state.articles.length} bài mới`, "success");
+  } catch (error) {
+    showToast(`Lỗi tải bài: ${error.message}`, "error");
+    list.innerHTML = '<div style="color:var(--color-text-danger);font-size:13px;padding:1rem 0;text-align:center">Không thể tải bài. Vui lòng thử lại.</div>';
+  } finally {
+    buttonLoading(btn, false, "Đang tải...", "Tải lại");
+  }
+}
+
+function resetSelectedArticleUI() {
+  document.getElementById("preview-box").textContent = "Chọn một bài để xem nội dung tóm tắt...";
+  document.getElementById("source-link").style.display = "none";
+  document.getElementById("gen-article-title").textContent = "Chưa chọn bài nào";
+  document.getElementById("gen-article-src").textContent = 'Quay lại tab "Thu thập tin" để chọn bài';
+  document.getElementById("gen-btn").disabled = true;
+  document.getElementById("main-prompt").value = 'Chưa có bài nào được chọn. Hãy chọn một bài từ tab "Thu thập tin" trước.';
+}
+
+function selectArticle(idx) {
+  const article = state.articles[idx];
+  if (!article) return;
+
+  state.selectedArticle = article;
+  renderArticles();
+
+  document.getElementById("preview-box").innerHTML = `<strong style="color:var(--color-text-primary)">${article.title}</strong><br><br>${article.summary || "(Không có tóm tắt)"}`;
+  document.getElementById("source-link").style.display = "block";
+  document.getElementById("source-url").href = article.url || "#";
+  document.getElementById("source-url").textContent = `Nguồn: ${article.source}`;
+
+  document.getElementById("gen-article-title").textContent = article.title;
+  document.getElementById("gen-article-src").textContent = `Nguồn: ${article.source} · ${formatRelative(article.published_at || article.created_at)}`;
+  document.getElementById("gen-btn").disabled = false;
+
+  buildPrompt();
+}
+
+function buildPrompt() {
+  if (!state.selectedArticle) return;
+
+  const niche = document.getElementById("niche-select").value;
+  const prompt = `Bạn là biên tập viên mạng xã hội chuyên quản lý page Facebook về chủ đề "${niche}".
+
+NHIỆM VỤ: Viết lại bài tin tức sau thành một post Facebook hấp dẫn.
+
+PHONG CÁCH: ${state.currentTone}
+
+BÀI GỐC:
+Tiêu đề: ${state.selectedArticle.title}
+Tóm tắt: ${state.selectedArticle.summary || ""}
+Nguồn: ${state.selectedArticle.source}
+
+YÊU CẦU OUTPUT:
+- Dài 150-250 từ
+- Câu đầu phải gây tò mò (hook)
+- Dùng 3-5 emoji phù hợp
+- Kết thúc bằng câu hỏi mời comment
+- KHÔNG copy nguyên văn bản gốc
+- Thêm dòng: "Nguồn: ${state.selectedArticle.source}" ở cuối`;
+
+  document.getElementById("main-prompt").value = prompt;
+}
+
+function runQuickChecks(text) {
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  const hasEmoji = /[\u{1F300}-\u{1FFFF}]/u.test(text);
+  const hasCTA = /\?|bạn nghĩ|bình luận|comment|share|chia sẻ/i.test(text);
+
+  document.getElementById("check-len-dot").className = "source-dot" + (wordCount >= 100 && wordCount <= 350 ? "" : " off");
+  document.getElementById("check-emoji-dot").className = "source-dot" + (hasEmoji ? "" : " off");
+  document.getElementById("check-cta-dot").className = "source-dot" + (hasCTA ? "" : " off");
+}
+
+async function generateContent() {
+  if (!state.selectedArticle) return;
+
+  const btn = document.getElementById("gen-btn");
+  const outputEl = document.getElementById("ai-output");
+
+  buttonLoading(btn, true, "AI đang viết...", "Tạo lại Caption");
+  outputEl.innerHTML = '<span class="ai-placeholder">AI đang tạo nội dung...</span>';
+
+  ["check-len-dot", "check-emoji-dot", "check-cta-dot"].forEach((id) => {
+    document.getElementById(id).className = "source-dot off";
+  });
+
+  try {
+    const payload = {
+      article: state.selectedArticle,
+      tone: state.currentTone,
+      niche: document.getElementById("niche-select").value,
+    };
+
+    const data = await apiFetch("/api/generate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    state.generatedCaption = data.caption || "";
+    outputEl.textContent = state.generatedCaption;
+    runQuickChecks(state.generatedCaption);
+    showToast("Đã tạo caption thành công", "success");
+  } catch (error) {
+    outputEl.innerHTML = `<span style="color:var(--color-text-danger)">Lỗi tạo nội dung: ${error.message}</span>`;
+    state.generatedCaption = "";
+    showToast(`Lỗi AI: ${error.message}`, "error");
+  } finally {
+    buttonLoading(btn, false, "AI đang viết...", "Tạo lại Caption");
+  }
+}
+
+async function copyCaption() {
+  if (!state.generatedCaption) {
+    showToast("Chưa có caption để sao chép", "info");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(state.generatedCaption);
+    showToast("Đã sao chép caption", "success");
+  } catch (error) {
+    showToast("Không thể sao chép vào clipboard", "error");
+  }
+}
+
+function getNextScheduleIso() {
+  const active = Array.from(document.querySelectorAll(".time-chip.active"))
+    .map((el) => {
+      const match = el.textContent.match(/(\d{2}:\d{2})/);
+      return match ? match[1] : null;
+    })
+    .filter(Boolean);
+
+  if (!active.length) {
+    return new Date(Date.now() + 30 * 60000).toISOString();
+  }
+
+  const now = new Date();
+  let candidates = active.map((hhmm) => {
+    const [hh, mm] = hhmm.split(":").map(Number);
+    const dt = new Date(now);
+    dt.setHours(hh, mm, 0, 0);
+    return dt;
+  });
+
+  let next = candidates.find((dt) => dt.getTime() > now.getTime());
+  if (!next) {
+    candidates = candidates.sort((a, b) => a - b);
+    next = new Date(candidates[0]);
+    next.setDate(next.getDate() + 1);
+  }
+
+  return next.toISOString();
+}
+
+async function addToQueue() {
+  if (!state.generatedCaption) {
+    showToast("Hãy tạo caption trước khi thêm vào hàng đợi", "info");
+    return;
+  }
+
+  try {
+    await apiFetch("/api/queue/add", {
+      method: "POST",
+      body: JSON.stringify({
+        article: state.selectedArticle || {},
+        caption: state.generatedCaption,
+        scheduled_for: getNextScheduleIso(),
+      }),
+    });
+
+    showToast("Đã thêm vào hàng đợi", "success");
+    await loadQueue();
+    switchTab("schedule");
+  } catch (error) {
+    showToast(`Không thể thêm hàng đợi: ${error.message}`, "error");
+  }
+}
+
+function queueStatusClass(status) {
+  if (status === "posted") return "done";
+  if (status === "scheduled") return "sched";
+  if (status === "failed") return "fail";
+  return "wait";
+}
+
+function renderQueue(items) {
+  const list = document.getElementById("queue-list");
+  if (!items.length) {
+    list.innerHTML = '<div style="color:var(--color-text-tertiary);font-size:13px;padding:0.6rem 0;text-align:center">Chưa có bài trong hàng đợi</div>';
+    return;
+  }
+
+  list.innerHTML = "";
+  items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "queue-item";
+
+    const schedule = item.scheduled_for ? formatTimeFromIso(item.scheduled_for) : "--:--";
+    const text = (item.caption || item.title || "").trim();
+    row.innerHTML = `
+      <span class="queue-time">${schedule}</span>
+      <span class="queue-text">${text.slice(0, 60)}${text.length > 60 ? "..." : ""}</span>
+      <span class="queue-status ${queueStatusClass(item.status)}">${item.status_label || item.status}</span>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function renderTodayStatus(today) {
+  document.getElementById("posted-count").textContent = `${today.posted_count || 0} bài`;
+  document.getElementById("queue-count").textContent = `${today.pending_count || 0} bài`;
+  document.getElementById("next-post-time").textContent = today.next_scheduled_for
+    ? `${formatTimeFromIso(today.next_scheduled_for)} ${new Date(today.next_scheduled_for).toLocaleDateString("vi-VN")}`
+    : "--";
+}
+
+async function loadQueue() {
+  try {
+    const data = await apiFetch("/api/queue");
+    state.queue = Array.isArray(data.items) ? data.items : [];
+    state.queueToday = data.today || { posted_count: 0, pending_count: 0, next_scheduled_for: null };
+
+    renderQueue(state.queue);
+    renderTodayStatus(state.queueToday);
+  } catch (error) {
+    showToast(`Không thể tải hàng đợi: ${error.message}`, "error");
+  }
+}
+
+async function postNow() {
+  const message = state.generatedCaption || state.queue.find((item) => item.status !== "posted")?.caption || "";
+  if (!message) {
+    showToast("Không có caption để đăng", "info");
+    return;
+  }
+
+  const btn = document.getElementById("post-now-btn");
+  buttonLoading(btn, true, "Đang đăng...", "Đăng lên Facebook ngay");
+
+  try {
+    const data = await apiFetch("/api/post-now", {
+      method: "POST",
+      body: JSON.stringify({
+        caption: message,
+        post_id: state.selectedArticle?.id || null,
+      }),
+    });
+
+    showToast(`Đăng Facebook thành công: ${data.facebook_post_id}`, "success");
+    await Promise.all([loadQueue(), loadStats()]);
+  } catch (error) {
+    showToast(`Đăng Facebook thất bại: ${error.message}`, "error");
+  } finally {
+    buttonLoading(btn, false, "Đang đăng...", "Đăng lên Facebook ngay");
+  }
+}
+
+function renderHourlyPerformance(items) {
+  const box = document.getElementById("hourly-performance-list");
+  if (!items.length) {
+    box.innerHTML = '<div style="font-size:12px;color:var(--color-text-tertiary)">Chưa có dữ liệu bài đã đăng.</div>';
+    return;
+  }
+
+  box.innerHTML = "";
+  items.forEach((item, idx) => {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:10px;font-size:13px";
+
+    const color = idx === 0 ? "#22c55e" : "#1877F2";
+    row.innerHTML = `
+      <span style="min-width:60px;color:var(--color-text-secondary)">${item.hour}</span>
+      <div style="flex:1;height:8px;background:var(--color-background-secondary);border-radius:4px;overflow:hidden">
+        <div style="width:${item.percent}%;height:100%;background:${color};border-radius:4px"></div>
+      </div>
+      <span style="min-width:35px;text-align:right;font-weight:500">${item.percent}%</span>
+    `;
+    box.appendChild(row);
+  });
+}
+
+function renderTopPosts(items) {
+  const box = document.getElementById("top-posts-list");
+  if (!items.length) {
+    box.innerHTML = '<div style="font-size:12px;color:var(--color-text-tertiary)">Chưa có dữ liệu bài top.</div>';
+    return;
+  }
+
+  box.innerHTML = "";
+  items.slice(0, 5).forEach((item) => {
+    const row = document.createElement("div");
+    row.style.cssText = "font-size:13px;padding:7px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)";
+    row.innerHTML = `
+      <div style="font-weight:500">${item.title}</div>
+      <div style="font-size:11px;color:var(--color-text-secondary);margin-top:3px">${item.source} · ${item.posted_at ? new Date(item.posted_at).toLocaleString("vi-VN") : "--"}</div>
+    `;
+    box.appendChild(row);
+  });
+}
+
+function renderTopSources(items) {
+  const box = document.getElementById("top-sources-list");
+  if (!items.length) {
+    box.innerHTML = '<div style="font-size:12px;color:var(--color-text-tertiary)">Chưa có dữ liệu nguồn.</div>';
+    return;
+  }
+
+  box.innerHTML = "";
+  items.slice(0, 5).forEach((item, idx) => {
+    const row = document.createElement("div");
+    const border = idx < items.length - 1 ? "border-bottom:0.5px solid var(--color-border-tertiary);" : "";
+    row.style.cssText = `display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:5px 0;${border}`;
+    row.innerHTML = `<span>${item.source}</span><span style="font-weight:500;color:var(--color-text-info)">${item.posted_count} bài</span>`;
+    box.appendChild(row);
+  });
+}
+
+async function loadStats() {
+  try {
+    const data = await apiFetch("/api/stats");
+    state.stats = data;
+
+    document.getElementById("stat-posted").textContent = data.summary?.posted_total ?? 0;
+    document.getElementById("stat-reach").textContent = data.summary?.last7days_total ?? 0;
+    document.getElementById("stat-engagement").textContent = data.summary?.scheduled_total ?? 0;
+
+    renderHourlyPerformance(Array.isArray(data.hourly_performance) ? data.hourly_performance : []);
+    renderTopPosts(Array.isArray(data.top_posts) ? data.top_posts : []);
+    renderTopSources(Array.isArray(data.top_sources) ? data.top_sources : []);
+  } catch (error) {
+    showToast(`Không thể tải thống kê: ${error.message}`, "error");
+  }
+}
+
+async function saveConfig() {
+  const pageId = document.getElementById("page-id-input").value.trim();
+  const token = document.getElementById("token-input").value.trim();
+  const claudeKey = document.getElementById("claude-key-input").value.trim();
+
+  try {
+    const data = await apiFetch("/api/config/save", {
+      method: "POST",
+      body: JSON.stringify({
+        page_id: pageId,
+        access_token: token,
+        claude_api_key: claudeKey,
+      }),
+    });
+
+    showToast(`Đã lưu cấu hình: ${data.saved_keys.join(", ")}`, "success");
+    await loadConfigStatus();
+  } catch (error) {
+    showToast(`Lưu cấu hình lỗi: ${error.message}`, "error");
+  }
+}
+
+async function loadConfigStatus() {
+  try {
+    const data = await apiFetch("/api/config/status");
+
+    const fbOk = Boolean(data.facebook?.ok);
+    const claudeOk = Boolean(data.claude?.ok);
+    const overallOk = fbOk && claudeOk;
+
+    const statusText = overallOk
+      ? "Facebook + Claude đã sẵn sàng"
+      : `Kết nối: FB ${fbOk ? "OK" : "Lỗi"} · Claude ${claudeOk ? "OK" : "Lỗi"}`;
+
+    setHeaderStatus(overallOk, statusText);
+    document.getElementById("post-now-btn").disabled = !(data.has_page_id && data.has_access_token);
+  } catch (error) {
+    setHeaderStatus(false, "Không thể kiểm tra trạng thái kết nối");
+    showToast(`Status API lỗi: ${error.message}`, "error");
+  }
+}
+
+function sendPrompt(message) {
+  showToast("Đã ghi nhận yêu cầu hướng dẫn: " + message, "info");
+}
+
+async function initDashboard() {
+  resetSelectedArticleUI();
+  renderArticles();
+  await Promise.all([loadConfigStatus(), loadQueue(), loadStats()]);
+}
+
+initDashboard();
+</script>
+
