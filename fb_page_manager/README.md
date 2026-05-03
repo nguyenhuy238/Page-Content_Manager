@@ -1,51 +1,75 @@
-# fb_page_manager
+# FB Page Manager
 
-Python project to automate content workflow for a Facebook Page:
-1. Crawl content from RSS and NewsAPI
-2. Rewrite caption with Claude API
-3. Schedule posts
-4. Publish via Facebook Graph API
-5. Track status in SQLite
+Dashboard và scheduler tự động cho Facebook Page:
+- Thu thập bài từ RSS/NewsAPI
+- Tạo caption bằng Claude
+- Đưa vào hàng đợi và đăng theo lịch
+- Theo dõi thống kê trong SQLite
 
-## Project structure
-
-```text
-fb_page_manager/
-├─ .env.example
-├─ .gitignore
-├─ requirements.txt
-├─ run.py
-└─ src/
-   └─ fb_page_manager/
-      ├─ __init__.py
-      ├─ ai_writer.py
-      ├─ config.py
-      ├─ crawler.py
-      ├─ database.py
-      ├─ fb_poster.py
-      ├─ main.py
-      └─ scheduler.py
-```
-
-## Quick start
+## Cài đặt (3 lệnh)
 
 ```bash
 python -m venv .venv
-# Windows:
 .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+## Cấu hình .env
+
+```bash
 copy .env.example .env
 ```
 
-Edit `.env` with real API credentials, then run:
+Mở `.env` và điền tối thiểu:
+- `PAGE_ID`
+- `ACCESS_TOKEN`
+- `CLAUDE_API_KEY`
+- `RSS_URLS`
+- `POSTING_TIMES`
+
+## Chạy web dashboard
 
 ```bash
-python run.py --once
+python run.py web
 ```
 
-Or run continuous scheduler:
+Mặc định mở ở `http://localhost:5000` (đổi qua `FLASK_PORT`).
+
+## Chạy scheduler 24/7
 
 ```bash
-python run.py
+python run.py scheduler
 ```
 
+Scheduler đọc `POSTING_TIMES` và mỗi slot sẽ lấy bài queued tiếp theo để đăng.
+
+## Chạy fetch một lần
+
+```bash
+python run.py fetch
+```
+
+## Test kết nối API
+
+```bash
+python run.py test
+```
+
+## Cấu trúc project
+
+```text
+fb_page_manager/
+├── .env.example           # Biến môi trường mẫu
+├── requirements.txt       # Thư viện Python cần cài
+├── run.py                 # Entry point: web/scheduler/fetch/test
+├── data/
+│   └── fb_page_manager.db # SQLite database
+└── src/fb_page_manager/
+    ├── config.py          # Load config từ .env
+    ├── database.py        # SQLite schema + operations
+    ├── crawler.py         # RSS + NewsAPI crawler
+    ├── ai_writer.py       # Claude caption generation
+    ├── fb_poster.py       # Facebook Graph API
+    ├── scheduler.py       # Lịch đăng với thư viện schedule
+    └── web_server.py      # Flask dashboard + REST API
+```
