@@ -1,9 +1,22 @@
+"""SQLite data access layer for Facebook Page Manager.
+
+Schema:
+- articles(id, title, url, source, summary, fetched_at, used)
+- posts(id, article_id, caption, scheduled_time, posted_at, status, reach, engagement)
+"""
+
 from __future__ import annotations
 
+import logging
 import sqlite3
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
+
+from .config import DB_PATH
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now_iso() -> str:
@@ -11,7 +24,9 @@ def utc_now_iso() -> str:
 
 
 class Database:
-    def __init__(self, db_path: str) -> None:
+    """Thin SQLite wrapper with explicit app operations."""
+
+    def __init__(self, db_path: str = DB_PATH) -> None:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
@@ -19,140 +34,280 @@ class Database:
         self._init_schema()
 
     def _init_schema(self) -> None:
-        with self.conn:
-            self.conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS posts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    summary TEXT,
-                    source_url TEXT NOT NULL UNIQUE,
-                    published_at TEXT,
-                    original_caption TEXT,
-                    rewritten_caption TEXT,
-                    status TEXT NOT NULL DEFAULT 'crawled',
-                    scheduled_for TEXT,
-                    facebook_post_id TEXT,
-                    error_message TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+        try:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS articles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        url TEXT NOT NULL UNIQUE,
+                        source TEXT NOT NULL,
+                        summary TEXT,
+                        fetched_at TEXT NOT NULL,
+                        used INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
                 )
-                """
-            )
-
-    def insert_crawled_post(self, item: Dict[str, Any]) -> Optional[int]:
-        now = utc_now_iso()
-        with self.conn:
-            cur = self.conn.execute(
-                """
-                INSERT OR IGNORE INTO posts (
-                    source, title, summary, source_url, published_at,
-                    original_caption, status, created_at, updated_at
+                self.conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS posts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        article_id INTEGER,
+                        caption TEXT NOT NULL,
+                        scheduled_time TEXT,
+                        posted_at TEXT,
+                        status TEXT NOT NULL DEFAULT 'queued',
+                        reach INTEGER NOT NULL DEFAULT 0,
+                        engagement INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY(article_id) REFERENCES articles(id)
+                    )
+                    """
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'crawled', ?, ?)
-                """,
-                (
-                    item["source"],
-                    item["title"],
-                    item.get("summary"),
-                    item["url"],
-                    item.get("published_at"),
-                    item.get("original_caption") or item["title"],
-                    now,
-                    now,
-                ),
-            )
-            if cur.rowcount == 0:
-                return None
-            return int(cur.lastrowid)
+        except Exception as exc:
+            logger.exception("Failed to initialize database schema: %s", exc)
+            raise
 
-    def get_posts_by_status(self, status: str, limit: int) -> List[Dict[str, Any]]:
-        cur = self.conn.execute(
-            """
-            SELECT * FROM posts
-            WHERE status = ?
-            ORDER BY created_at ASC
-            LIMIT ?
-            """,
-            (status, limit),
-        )
-        return [dict(row) for row in cur.fetchall()]
+    def save_article(self, article: Dict[str, Any]) -> Optional[int]:
+        """Save article if URL is not duplicate. Returns article id or None."""
+        title = str(article.get("title") or "").strip()
+        url = str(article.get("url") or "").strip()
+        source = str(article.get("source") or "unknown").strip()
+        summary = str(article.get("summary") or "").strip()
 
-    def mark_rewritten(self, post_id: int, rewritten_caption: str) -> None:
-        now = utc_now_iso()
-        with self.conn:
-            self.conn.execute(
-                """
-                UPDATE posts
-                SET rewritten_caption = ?, status = 'rewritten', updated_at = ?
-                WHERE id = ?
-                """,
-                (rewritten_caption, now, post_id),
-            )
-
-    def mark_scheduled(self, post_id: int, scheduled_for: str) -> None:
-        now = utc_now_iso()
-        with self.conn:
-            self.conn.execute(
-                """
-                UPDATE posts
-                SET scheduled_for = ?, status = 'scheduled', updated_at = ?
-                WHERE id = ?
-                """,
-                (scheduled_for, now, post_id),
-            )
-
-    def get_latest_scheduled_time(self) -> Optional[datetime]:
-        cur = self.conn.execute(
-            """
-            SELECT scheduled_for FROM posts
-            WHERE status IN ('scheduled', 'posted') AND scheduled_for IS NOT NULL
-            ORDER BY scheduled_for DESC
-            LIMIT 1
-            """
-        )
-        row = cur.fetchone()
-        if not row:
+        if not title or not url:
+            logger.warning("Skipping invalid article payload: %s", article)
             return None
-        return datetime.fromisoformat(row["scheduled_for"])
 
-    def get_due_scheduled_posts(self, now_iso: str, limit: int) -> List[Dict[str, Any]]:
-        cur = self.conn.execute(
-            """
-            SELECT * FROM posts
-            WHERE status = 'scheduled' AND scheduled_for <= ?
-            ORDER BY scheduled_for ASC
-            LIMIT ?
-            """,
-            (now_iso, limit),
-        )
-        return [dict(row) for row in cur.fetchall()]
+        if self.is_duplicate(url):
+            return None
 
-    def mark_posted(self, post_id: int, facebook_post_id: str) -> None:
-        now = utc_now_iso()
-        with self.conn:
-            self.conn.execute(
+        try:
+            with self.conn:
+                cur = self.conn.execute(
+                    """
+                    INSERT INTO articles (title, url, source, summary, fetched_at, used)
+                    VALUES (?, ?, ?, ?, ?, 0)
+                    """,
+                    (title, url, source, summary, utc_now_iso()),
+                )
+            return int(cur.lastrowid)
+        except Exception as exc:
+            logger.exception("Failed to save article url=%s: %s", url, exc)
+            return None
+
+    def is_duplicate(self, url: str) -> bool:
+        """Return True if article URL already exists."""
+        try:
+            row = self.conn.execute(
+                "SELECT 1 FROM articles WHERE url = ? LIMIT 1",
+                (url.strip(),),
+            ).fetchone()
+            return row is not None
+        except Exception as exc:
+            logger.exception("Duplicate check failed for url=%s: %s", url, exc)
+            return False
+
+    def add_to_queue(
+        self,
+        article_id: int,
+        caption: str,
+        scheduled_time: Optional[str] = None,
+        status: str = "queued",
+    ) -> Optional[int]:
+        """Add generated caption to posting queue."""
+        if not caption.strip():
+            logger.warning("Empty caption cannot be queued")
+            return None
+
+        try:
+            with self.conn:
+                cur = self.conn.execute(
+                    """
+                    INSERT INTO posts (article_id, caption, scheduled_time, status, posted_at, reach, engagement)
+                    VALUES (?, ?, ?, ?, NULL, 0, 0)
+                    """,
+                    (article_id, caption.strip(), scheduled_time, status),
+                )
+                self.conn.execute("UPDATE articles SET used = 1 WHERE id = ?", (article_id,))
+            return int(cur.lastrowid)
+        except Exception as exc:
+            logger.exception("Failed to add post to queue article_id=%s: %s", article_id, exc)
+            return None
+
+    def get_queue(self, status: str = "queued", limit: int = 50) -> List[Dict[str, Any]]:
+        """Get queue items with article metadata."""
+        try:
+            rows = self.conn.execute(
                 """
-                UPDATE posts
-                SET facebook_post_id = ?, status = 'posted', updated_at = ?
-                WHERE id = ?
+                SELECT
+                    p.id,
+                    p.article_id,
+                    p.caption,
+                    p.scheduled_time,
+                    p.posted_at,
+                    p.status,
+                    p.reach,
+                    p.engagement,
+                    a.title,
+                    a.url,
+                    a.source,
+                    a.summary,
+                    a.fetched_at
+                FROM posts p
+                LEFT JOIN articles a ON a.id = p.article_id
+                WHERE p.status = ?
+                ORDER BY
+                    CASE WHEN p.scheduled_time IS NULL THEN 1 ELSE 0 END,
+                    p.scheduled_time ASC,
+                    p.id ASC
+                LIMIT ?
                 """,
-                (facebook_post_id, now, post_id),
+                (status, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            logger.exception("Failed to get queue status=%s: %s", status, exc)
+            return []
+
+    def update_post_status(
+        self,
+        post_id: int,
+        status: str,
+        posted_at: Optional[str] = None,
+        reach: Optional[int] = None,
+        engagement: Optional[int] = None,
+    ) -> bool:
+        """Update post status and optional metrics."""
+        try:
+            existing = self.conn.execute(
+                "SELECT posted_at, reach, engagement FROM posts WHERE id = ? LIMIT 1",
+                (post_id,),
+            ).fetchone()
+            if existing is None:
+                logger.warning("Post id=%s does not exist", post_id)
+                return False
+
+            final_posted_at = posted_at if posted_at is not None else existing["posted_at"]
+            final_reach = int(reach) if reach is not None else int(existing["reach"] or 0)
+            final_engagement = (
+                int(engagement) if engagement is not None else int(existing["engagement"] or 0)
             )
 
-    def mark_failed(self, post_id: int, error_message: str) -> None:
-        now = utc_now_iso()
-        with self.conn:
-            self.conn.execute(
+            with self.conn:
+                self.conn.execute(
+                    """
+                    UPDATE posts
+                    SET status = ?, posted_at = ?, reach = ?, engagement = ?
+                    WHERE id = ?
+                    """,
+                    (status, final_posted_at, final_reach, final_engagement, post_id),
+                )
+            return True
+        except Exception as exc:
+            logger.exception("Failed to update post status id=%s: %s", post_id, exc)
+            return False
+
+    def get_stats(self, days: int = 7) -> Dict[str, Any]:
+        """Return aggregated queue/post metrics for the given day window."""
+        days = max(1, int(days))
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        try:
+            totals = self.conn.execute(
                 """
-                UPDATE posts
-                SET status = 'failed', error_message = ?, updated_at = ?
-                WHERE id = ?
+                SELECT
+                    COUNT(*) AS total_posts,
+                    SUM(CASE WHEN status='posted' THEN 1 ELSE 0 END) AS posted,
+                    SUM(CASE WHEN status='queued' THEN 1 ELSE 0 END) AS queued,
+                    SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+                    COALESCE(SUM(reach), 0) AS reach,
+                    COALESCE(SUM(engagement), 0) AS engagement
+                FROM posts
+                """
+            ).fetchone()
+
+            timeline_rows = self.conn.execute(
+                """
+                SELECT
+                    DATE(COALESCE(posted_at, scheduled_time)) AS day,
+                    COUNT(*) AS count
+                FROM posts
+                WHERE COALESCE(posted_at, scheduled_time) IS NOT NULL
+                  AND COALESCE(posted_at, scheduled_time) >= ?
+                GROUP BY DATE(COALESCE(posted_at, scheduled_time))
+                ORDER BY day ASC
                 """,
-                (error_message[:1000], now, post_id),
-            )
+                (since,),
+            ).fetchall()
+
+            top_articles = self.conn.execute(
+                """
+                SELECT a.title, p.reach, p.engagement, p.posted_at
+                FROM posts p
+                JOIN articles a ON a.id = p.article_id
+                WHERE p.status='posted'
+                ORDER BY p.reach DESC, p.engagement DESC
+                LIMIT 5
+                """
+            ).fetchall()
+
+            return {
+                "summary": {
+                    "total_posts": int(totals["total_posts"] or 0),
+                    "posted": int(totals["posted"] or 0),
+                    "queued": int(totals["queued"] or 0),
+                    "failed": int(totals["failed"] or 0),
+                    "reach": int(totals["reach"] or 0),
+                    "engagement": int(totals["engagement"] or 0),
+                },
+                "timeline": [dict(r) for r in timeline_rows],
+                "top_posts": [dict(r) for r in top_articles],
+            }
+        except Exception as exc:
+            logger.exception("Failed to compute stats: %s", exc)
+            return {
+                "summary": {
+                    "total_posts": 0,
+                    "posted": 0,
+                    "queued": 0,
+                    "failed": 0,
+                    "reach": 0,
+                    "engagement": 0,
+                },
+                "timeline": [],
+                "top_posts": [],
+            }
+
+    def fetch_unused_articles(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Return available articles not yet used in queue."""
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM articles
+                WHERE used = 0
+                ORDER BY fetched_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            logger.exception("Failed to fetch unused articles: %s", exc)
+            return []
 
     def close(self) -> None:
-        self.conn.close()
+        try:
+            self.conn.close()
+        except Exception as exc:
+            logger.exception("Failed to close DB connection: %s", exc)
+
+
+@contextmanager
+def database_context(db_path: str = DB_PATH) -> Generator[Database, None, None]:
+    db = Database(db_path)
+    try:
+        yield db
+    finally:
+        db.close()
 

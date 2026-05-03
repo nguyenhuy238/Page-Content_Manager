@@ -1,268 +1,231 @@
+"""Content crawler module.
+
+Provides RSS and NewsAPI fetch helpers with duplicate filtering through database.
+"""
+
 from __future__ import annotations
 
 import logging
-import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set
-from urllib.parse import urlsplit, urlunsplit
+from typing import Any, Dict, Iterable, List, Optional
 
 import feedparser
 import requests
-from dateutil import parser as date_parser
 
-from .config import Settings
+from .config import NEWS_API_KEY, NEWS_KEYWORD, NEWS_LANGUAGE, NEWS_PAGE_SIZE, RSS_URLS
+from .database import Database
 
 logger = logging.getLogger(__name__)
 
 
-class Crawler:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
+def _normalize_article(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    title = str(item.get("title") or "").strip()
+    url = str(item.get("url") or "").strip()
+    source = str(item.get("source") or "unknown").strip()
+    summary = str(item.get("summary") or "").strip()
+    published_at = str(item.get("published_at") or datetime.now(timezone.utc).isoformat())
 
-    def collect(self) -> List[Dict[str, Any]]:
-        logger.info("Starting content collection")
-        rss_items = self._collect_rss()
-        newsapi_items = self._collect_newsapi()
-        merged_items = rss_items + newsapi_items
+    if not title or not url:
+        return None
 
-        unique_items = self._deduplicate_in_batch(merged_items)
-        fresh_items = self._filter_existing_urls(unique_items)
+    return {
+        "title": title,
+        "url": url,
+        "source": source,
+        "summary": summary,
+        "published_at": published_at,
+    }
 
-        logger.info(
-            "Collection finished: rss=%s, newsapi=%s, merged=%s, unique=%s, fresh=%s",
-            len(rss_items),
-            len(newsapi_items),
-            len(merged_items),
-            len(unique_items),
-            len(fresh_items),
-        )
-        return fresh_items
 
-    def _collect_rss(self) -> List[Dict[str, Any]]:
-        results: List[Dict[str, Any]] = []
-        if not self.settings.rss_feeds:
-            logger.warning("RSS_FEEDS is empty. Skipping RSS collection.")
-            return results
+def _filter_duplicates(candidates: Iterable[Dict[str, Any]], db: Database) -> List[Dict[str, Any]]:
+    filtered: List[Dict[str, Any]] = []
+    seen_urls: set[str] = set()
 
-        for feed_url in self.settings.rss_feeds:
-            normalized_feed_url = self._normalize_url(feed_url)
-            if not normalized_feed_url:
-                logger.warning("Skipping invalid RSS URL: %r", feed_url)
+    for raw in candidates:
+        article = _normalize_article(raw)
+        if article is None:
+            continue
+
+        url = article["url"]
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        try:
+            if db.is_duplicate(url):
+                continue
+        except Exception as exc:
+            logger.exception("Duplicate check failed for %s: %s", url, exc)
+
+        filtered.append(article)
+
+    return filtered
+
+
+def fetch_rss(urls: List[str], db: Optional[Database] = None) -> List[Dict[str, Any]]:
+    """Fetch RSS feeds and return standardized article dictionaries."""
+    local_db = db or Database()
+    close_when_done = db is None
+
+    try:
+        candidates: List[Dict[str, Any]] = []
+
+        for feed_url in urls:
+            if not str(feed_url).strip():
                 continue
 
             try:
-                feed = feedparser.parse(normalized_feed_url)
-                if getattr(feed, "bozo", False):
-                    logger.warning(
-                        "RSS feed has parse issues: %s | %s",
-                        normalized_feed_url,
-                        getattr(feed, "bozo_exception", "unknown parse error"),
-                    )
+                feed = feedparser.parse(feed_url)
+                feed_title = str(getattr(feed, "feed", {}).get("title", "RSS")).strip() or "RSS"
+                source = f"rss:{feed_title}"
 
-                feed_title = (
-                    str(feed.feed.get("title", "unknown")).strip()
-                    if getattr(feed, "feed", None)
-                    else "unknown"
-                )
-                feed_source = f"rss:{feed_title or 'unknown'}"
-
-                for entry in feed.entries:
-                    url = self._normalize_url(entry.get("link"))
-                    title = str(entry.get("title", "")).strip()
-                    if not url or not title:
+                for entry in getattr(feed, "entries", []):
+                    link = str(entry.get("link") or "").strip()
+                    title = str(entry.get("title") or "").strip()
+                    if not link or not title:
                         continue
 
-                    summary_raw = (
+                    summary = (
                         entry.get("summary")
                         or entry.get("description")
                         or entry.get("subtitle")
                         or ""
                     )
-                    published = (
+                    published_at = (
                         entry.get("published")
                         or entry.get("updated")
-                        or entry.get("created")
                         or datetime.now(timezone.utc).isoformat()
                     )
 
-                    results.append(
+                    candidates.append(
                         {
-                            "source": feed_source,
                             "title": title,
-                            "summary": str(summary_raw).strip(),
-                            "url": url,
-                            "published_at": self._normalize_datetime(published),
+                            "url": link,
+                            "source": source,
+                            "summary": str(summary).strip(),
+                            "published_at": str(published_at),
                         }
                     )
             except Exception as exc:
-                logger.exception("RSS collection failed for %s: %s", normalized_feed_url, exc)
+                logger.exception("Failed to parse RSS feed %s: %s", feed_url, exc)
 
-        return results
+        return _filter_duplicates(candidates, local_db)
+    except Exception as exc:
+        logger.exception("fetch_rss failed: %s", exc)
+        return []
+    finally:
+        if close_when_done:
+            local_db.close()
 
-    def _collect_newsapi(self) -> List[Dict[str, Any]]:
-        if not self.settings.newsapi_key:
-            logger.warning("NEWSAPI_KEY is empty. Skipping NewsAPI.")
-            return []
 
+def fetch_newsapi(
+    keyword: str,
+    api_key: str,
+    db: Optional[Database] = None,
+    language: str = NEWS_LANGUAGE,
+    page_size: int = NEWS_PAGE_SIZE,
+) -> List[Dict[str, Any]]:
+    """Fetch NewsAPI articles and return standardized article dictionaries."""
+    if not api_key:
+        logger.warning("NEWS_API_KEY missing. Skipping NewsAPI request.")
+        return []
+
+    local_db = db or Database()
+    close_when_done = db is None
+
+    try:
         endpoint = "https://newsapi.org/v2/everything"
         params = {
-            "q": self.settings.newsapi_query,
-            "language": self.settings.newsapi_language,
-            "pageSize": self.settings.newsapi_page_size,
+            "q": keyword,
+            "language": language,
             "sortBy": "publishedAt",
+            "pageSize": max(1, min(int(page_size), 100)),
         }
-        headers = {"X-Api-Key": self.settings.newsapi_key}
+        headers = {"X-Api-Key": api_key}
 
-        try:
-            response = requests.get(endpoint, params=params, headers=headers, timeout=20)
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, dict):
-                logger.error("NewsAPI payload is not a JSON object. Skipping.")
-                return []
+        response = requests.get(endpoint, params=params, headers=headers, timeout=20)
+        response.raise_for_status()
+        payload = response.json()
 
-            status = payload.get("status")
-            if status != "ok":
-                logger.error(
-                    "NewsAPI returned non-ok status: %s | message=%s",
-                    status,
-                    payload.get("message", ""),
-                )
-                return []
+        articles = payload.get("articles", []) if isinstance(payload, dict) else []
+        candidates: List[Dict[str, Any]] = []
 
-            articles = payload.get("articles", [])
-            if not isinstance(articles, list):
-                logger.error("NewsAPI 'articles' field is not a list. Skipping.")
-                return []
-        except requests.RequestException as exc:
-            logger.exception("NewsAPI request failed: %s", exc)
-            return []
-        except ValueError as exc:
-            logger.exception("NewsAPI JSON decode failed: %s", exc)
-            return []
-        except Exception as exc:
-            logger.exception("Unexpected NewsAPI failure: %s", exc)
-            return []
-
-        results: List[Dict[str, Any]] = []
-        for article in articles:
-            if not isinstance(article, dict):
+        for item in articles:
+            if not isinstance(item, dict):
                 continue
 
-            url = self._normalize_url(article.get("url"))
-            title = str(article.get("title") or "").strip()
-            if not url or not title:
+            link = str(item.get("url") or "").strip()
+            title = str(item.get("title") or "").strip()
+            if not link or not title:
                 continue
 
-            source = article.get("source")
             source_name = "newsapi"
-            if isinstance(source, dict):
-                source_name = str(source.get("name") or "newsapi").strip() or "newsapi"
+            source_obj = item.get("source")
+            if isinstance(source_obj, dict):
+                source_name = str(source_obj.get("name") or "newsapi").strip() or "newsapi"
 
-            results.append(
+            candidates.append(
                 {
-                    "source": f"newsapi:{source_name}",
                     "title": title,
-                    "summary": str(article.get("description") or "").strip(),
-                    "url": url,
-                    "published_at": self._normalize_datetime(
-                        article.get("publishedAt") or datetime.now(timezone.utc).isoformat()
+                    "url": link,
+                    "source": f"newsapi:{source_name}",
+                    "summary": str(item.get("description") or "").strip(),
+                    "published_at": str(
+                        item.get("publishedAt") or datetime.now(timezone.utc).isoformat()
                     ),
                 }
             )
 
-        return results
+        return _filter_duplicates(candidates, local_db)
+    except Exception as exc:
+        logger.exception("fetch_newsapi failed: %s", exc)
+        return []
+    finally:
+        if close_when_done:
+            local_db.close()
 
-    def _normalize_datetime(self, value: str) -> str:
-        try:
-            dt = date_parser.parse(value)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc).isoformat()
-        except Exception as exc:
-            logger.debug("Failed to parse datetime value %r: %s", value, exc)
-            return datetime.now(timezone.utc).isoformat()
 
-    @staticmethod
-    def _normalize_url(raw_url: Any) -> Optional[str]:
-        if not raw_url:
-            return None
+class Crawler:
+    """Compatibility wrapper for pipeline-style collection."""
+
+    def __init__(self, settings: Any = None) -> None:
+        self.settings = settings
+
+    def collect(self) -> List[Dict[str, Any]]:
+        """Collect from RSS + NewsAPI and persist new articles into DB."""
+        db = Database()
         try:
-            url = str(raw_url).strip()
-            if not url:
-                return None
-            parsed = urlsplit(url)
-            if parsed.scheme not in {"http", "https"}:
-                return None
-            if not parsed.netloc:
-                return None
-            normalized = urlunsplit(
-                (
-                    parsed.scheme.lower(),
-                    parsed.netloc.lower(),
-                    parsed.path or "",
-                    parsed.query or "",
-                    "",
-                )
+            urls = RSS_URLS
+            keyword = NEWS_KEYWORD
+            api_key = NEWS_API_KEY
+
+            if self.settings is not None:
+                urls = getattr(self.settings, "rss_urls", urls)
+                keyword = getattr(self.settings, "news_keyword", keyword)
+                api_key = getattr(self.settings, "news_api_key", api_key)
+
+            rss_items = fetch_rss(urls=urls, db=db)
+            news_items = fetch_newsapi(keyword=keyword, api_key=api_key, db=db)
+            all_items = rss_items + news_items
+
+            saved: List[Dict[str, Any]] = []
+            for article in all_items:
+                article_id = db.save_article(article)
+                if article_id is not None:
+                    enriched = dict(article)
+                    enriched["id"] = article_id
+                    saved.append(enriched)
+
+            logger.info(
+                "Crawler collected rss=%s newsapi=%s saved=%s",
+                len(rss_items),
+                len(news_items),
+                len(saved),
             )
-            return normalized
+            return saved
         except Exception as exc:
-            logger.debug("Invalid URL %r: %s", raw_url, exc)
-            return None
-
-    @staticmethod
-    def _deduplicate_in_batch(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        seen: Set[str] = set()
-        unique: List[Dict[str, Any]] = []
-
-        for item in items:
-            url = item.get("url")
-            if not url:
-                continue
-            if url in seen:
-                continue
-            seen.add(url)
-            unique.append(item)
-
-        return unique
-
-    def _filter_existing_urls(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if not items:
+            logger.exception("Crawler.collect failed: %s", exc)
             return []
+        finally:
+            db.close()
 
-        urls = [item["url"] for item in items if item.get("url")]
-        if not urls:
-            return []
-
-        existing_urls = self._fetch_existing_urls(urls)
-        if not existing_urls:
-            return items
-
-        filtered = [item for item in items if item["url"] not in existing_urls]
-        logger.info(
-            "Filtered %s duplicate item(s) already in database",
-            len(items) - len(filtered),
-        )
-        return filtered
-
-    def _fetch_existing_urls(self, urls: Iterable[str]) -> Set[str]:
-        normalized_urls = [url for url in urls if url]
-        if not normalized_urls:
-            return set()
-
-        db_file = Path(self.settings.db_path)
-        if not db_file.exists():
-            return set()
-
-        placeholders = ",".join("?" for _ in normalized_urls)
-        sql = f"SELECT source_url FROM posts WHERE source_url IN ({placeholders})"
-
-        try:
-            with sqlite3.connect(self.settings.db_path) as conn:
-                cur = conn.execute(sql, normalized_urls)
-                rows = cur.fetchall()
-            return {str(row[0]) for row in rows if row and row[0]}
-        except sqlite3.Error as exc:
-            logger.exception("Database deduplication query failed: %s", exc)
-            return set()

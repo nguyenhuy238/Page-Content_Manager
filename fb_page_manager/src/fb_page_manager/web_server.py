@@ -1,20 +1,26 @@
+"""Flask web server for Facebook Page Manager dashboard.
+
+This server keeps a stable `/api/...` contract for the frontend dashboard,
+while using the new database API/schema (`articles`, `posts`) underneath.
+"""
+
 from __future__ import annotations
 
 import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 from anthropic import Anthropic
 from flask import Flask, jsonify, render_template, request
-import requests
 
-from .ai_writer import AIWriter
-from .config import get_settings
-from .crawler import Crawler
+from .ai_writer import generate_caption, quality_check
+from .config import DB_PATH, get_settings, reload_config
+from .crawler import fetch_newsapi, fetch_rss
 from .database import Database
-from .fb_poster import FacebookPoster
+from .fb_poster import GRAPH_VERSION, get_post_insights, post_to_page
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +42,11 @@ def _error(message: str, status: int = 400, details: Any = None):
 
 
 def _open_db() -> Database:
-    settings = get_settings()
-    return Database(settings.db_path)
+    try:
+        settings = get_settings()
+        return Database(settings.db_path)
+    except Exception:
+        return Database(DB_PATH)
 
 
 def _ensure_env_file() -> None:
@@ -49,32 +58,62 @@ def _save_env_values(values: Dict[str, str]) -> None:
     _ensure_env_file()
     lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
 
-    updated = dict(values)
+    pending = dict(values)
     for idx, line in enumerate(lines):
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in line:
             continue
+
         key, _ = line.split("=", 1)
         key = key.strip()
-        if key in updated:
-            lines[idx] = f"{key}={updated[key]}"
-            del updated[key]
+        if key in pending:
+            lines[idx] = f"{key}={pending[key]}"
+            del pending[key]
 
-    for key, value in updated.items():
+    for key, value in pending.items():
         lines.append(f"{key}={value}")
 
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _serialize_article(row: Dict[str, Any]) -> Dict[str, Any]:
+    fetched_at = row.get("fetched_at")
+    return {
+        "id": row.get("id"),
+        "title": row.get("title") or "",
+        "url": row.get("url") or "",
+        "source": row.get("source") or "unknown",
+        "summary": row.get("summary") or "",
+        "published_at": fetched_at,
+        "created_at": fetched_at,
+        "used": bool(row.get("used")),
+    }
+
+
+def _status_label(status: str) -> str:
+    mapping = {
+        "queued": "Đã lên lịch",
+        "posted": "Đã đăng",
+        "failed": "Thất bại",
+    }
+    return mapping.get(status, status)
+
+
+def _status_for_ui(status: str) -> str:
+    if status == "queued":
+        return "scheduled"
+    return status
+
+
 def _try_fb_status() -> Tuple[bool, str]:
     settings = get_settings()
-    if not settings.fb_page_id or not settings.fb_page_access_token:
-        return False, "Thiếu FB_PAGE_ID hoặc FB_PAGE_ACCESS_TOKEN"
+    if not settings.page_id or not settings.access_token:
+        return False, "Thiếu PAGE_ID hoặc ACCESS_TOKEN"
 
-    url = f"https://graph.facebook.com/{settings.fb_api_version}/{settings.fb_page_id}"
+    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{settings.page_id}"
     params = {
         "fields": "id,name",
-        "access_token": settings.fb_page_access_token,
+        "access_token": settings.access_token,
     }
 
     try:
@@ -97,8 +136,7 @@ def _try_claude_status() -> Tuple[bool, str]:
     try:
         client = Anthropic(api_key=settings.claude_api_key)
         models_page = client.models.list(limit=1)
-        has_data = bool(getattr(models_page, "data", []))
-        if not has_data:
+        if not bool(getattr(models_page, "data", [])):
             return False, "Claude API trả danh sách model rỗng"
         return True, "Kết nối Claude API OK"
     except Exception as exc:
@@ -106,27 +144,32 @@ def _try_claude_status() -> Tuple[bool, str]:
         return False, f"Claude API lỗi: {exc}"
 
 
-def _serialize_article(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "id": row.get("id"),
-        "source": row.get("source") or "unknown",
-        "title": row.get("title") or "",
-        "summary": row.get("summary") or "",
-        "url": row.get("source_url") or row.get("url") or "",
-        "published_at": row.get("published_at"),
-        "created_at": row.get("created_at"),
-    }
+def _parse_csv(value: str) -> List[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def _queue_status_label(status: str) -> str:
-    mapping = {
-        "posted": "Đã đăng",
-        "scheduled": "Đã lên lịch",
-        "failed": "Thất bại",
-        "rewritten": "Đang chờ",
-        "crawled": "Mới thu thập",
-    }
-    return mapping.get(status, status)
+def _parse_times(value: str) -> List[str]:
+    valid: List[str] = []
+    for item in _parse_csv(value):
+        try:
+            hh, mm = item.split(":", 1)
+            h = int(hh)
+            m = int(mm)
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                valid.append(f"{h:02d}:{m:02d}")
+        except Exception:
+            continue
+    return valid
+
+
+def _get_article_id_by_url(db: Database, url: str) -> Optional[int]:
+    row = db.conn.execute(
+        "SELECT id FROM articles WHERE url = ? LIMIT 1",
+        (url,),
+    ).fetchone()
+    if row is None:
+        return None
+    return int(row["id"])
 
 
 def create_app() -> Flask:
@@ -140,41 +183,47 @@ def create_app() -> Flask:
     @app.get("/api/articles")
     def api_articles():
         settings = get_settings()
-        crawler = Crawler(settings)
+        db = _open_db()
 
         try:
-            collected = crawler.collect()
-            inserted_rows: List[Dict[str, Any]] = []
+            rss_items = fetch_rss(urls=settings.rss_urls, db=db)
+            news_items = fetch_newsapi(
+                keyword=settings.news_keyword,
+                api_key=settings.news_api_key,
+                db=db,
+                language=settings.news_language,
+                page_size=settings.news_page_size,
+            )
 
-            db = _open_db()
-            try:
-                for item in collected:
-                    post_id = db.insert_crawled_post(item)
-                    if post_id is None:
-                        cur = db.conn.execute(
-                            "SELECT * FROM posts WHERE source_url = ? LIMIT 1",
-                            (item["url"],),
-                        )
-                        row = cur.fetchone()
-                        if row:
-                            inserted_rows.append(dict(row))
-                        continue
+            inserted = 0
+            for article in rss_items + news_items:
+                article_id = db.save_article(article)
+                if article_id is not None:
+                    inserted += 1
 
-                    cur = db.conn.execute(
-                        "SELECT * FROM posts WHERE id = ? LIMIT 1",
-                        (post_id,),
-                    )
-                    row = cur.fetchone()
-                    if row:
-                        inserted_rows.append(dict(row))
-            finally:
-                db.close()
+            rows = db.conn.execute(
+                """
+                SELECT id, title, url, source, summary, fetched_at, used
+                FROM articles
+                ORDER BY fetched_at DESC
+                LIMIT 100
+                """
+            ).fetchall()
+            data = [_serialize_article(dict(row)) for row in rows]
 
-            inserted_rows.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-            return _success([_serialize_article(row) for row in inserted_rows])
+            logger.info(
+                "Articles fetched: rss=%s newsapi=%s inserted=%s returned=%s",
+                len(rss_items),
+                len(news_items),
+                inserted,
+                len(data),
+            )
+            return _success(data)
         except Exception as exc:
             logger.exception("Failed to fetch articles: %s", exc)
             return _error("Không thể thu thập bài viết", 500, str(exc))
+        finally:
+            db.close()
 
     @app.post("/api/generate")
     def api_generate():
@@ -182,91 +231,81 @@ def create_app() -> Flask:
         article = payload.get("article")
         tone = str(payload.get("tone") or "hài hước").strip()
         niche = str(payload.get("niche") or "Công nghệ & AI").strip()
+        prompt_template = payload.get("prompt_template")
 
         if not isinstance(article, dict):
             return _error("Thiếu dữ liệu article", 400)
 
         title = str(article.get("title") or "").strip()
-        summary = str(article.get("summary") or "").strip()
         url = str(article.get("url") or "").strip()
-
         if not title or not url:
             return _error("Article cần có title và url", 400)
 
-        settings = get_settings()
-        writer = AIWriter(settings)
-
-        # Keep AIWriter as requested while injecting dashboard context into summary.
-        summary_with_context = (
-            f"{summary}\n\n"
-            f"Bối cảnh trang: {niche}. Giọng văn mong muốn: {tone}."
-        ).strip()
-
-        caption = writer.rewrite_caption(title=title, summary=summary_with_context, url=url)
-
-        article_id = article.get("id")
-        if isinstance(article_id, int):
-            db = _open_db()
-            try:
-                db.mark_rewritten(article_id, caption)
-            except Exception as exc:
-                logger.exception("Failed to mark rewritten post id=%s: %s", article_id, exc)
-            finally:
-                db.close()
-
-        return _success({"caption": caption})
+        try:
+            caption = generate_caption(
+                article=article,
+                tone=tone,
+                niche=niche,
+                prompt_template=prompt_template if isinstance(prompt_template, str) else None,
+            )
+            qc = quality_check(caption)
+            return _success({"caption": caption, "quality": qc})
+        except Exception as exc:
+            logger.exception("Generate caption failed: %s", exc)
+            return _error("Không thể tạo caption", 500, str(exc))
 
     @app.get("/api/queue")
     def api_queue():
         db = _open_db()
         try:
-            cur = db.conn.execute(
-                """
-                SELECT id, title, rewritten_caption, original_caption, source, source_url,
-                       scheduled_for, status, facebook_post_id, updated_at
-                FROM posts
-                WHERE status IN ('scheduled', 'posted', 'failed', 'rewritten')
-                ORDER BY
-                    CASE WHEN status = 'posted' THEN 0 ELSE 1 END,
-                    COALESCE(scheduled_for, updated_at) ASC
-                LIMIT 100
-                """
-            )
-            rows = [dict(row) for row in cur.fetchall()]
+            queued_rows = db.get_queue(status="queued", limit=100)
+            posted_rows = db.get_queue(status="posted", limit=100)
+            failed_rows = db.get_queue(status="failed", limit=100)
 
-            queue_items = []
-            for row in rows:
-                queue_items.append(
+            merged_rows = posted_rows + queued_rows + failed_rows
+            items = []
+            for row in merged_rows:
+                raw_status = str(row.get("status") or "queued")
+                items.append(
                     {
-                        "id": row["id"],
-                        "title": row["title"],
-                        "caption": row.get("rewritten_caption") or row.get("original_caption") or row["title"],
+                        "id": row.get("id"),
+                        "title": row.get("title") or "",
+                        "caption": row.get("caption") or "",
                         "source": row.get("source") or "unknown",
-                        "url": row.get("source_url") or "",
-                        "scheduled_for": row.get("scheduled_for"),
-                        "status": row.get("status"),
-                        "status_label": _queue_status_label(str(row.get("status") or "")),
-                        "facebook_post_id": row.get("facebook_post_id"),
+                        "url": row.get("url") or "",
+                        "scheduled_for": row.get("scheduled_time"),
+                        "status": _status_for_ui(raw_status),
+                        "status_label": _status_label(raw_status),
+                        "facebook_post_id": None,
                     }
                 )
 
             posted_today = db.conn.execute(
                 """
-                SELECT COUNT(*) AS n FROM posts
-                WHERE status='posted' AND DATE(updated_at)=DATE('now', 'localtime')
+                SELECT COUNT(*) AS n
+                FROM posts
+                WHERE status='posted' AND DATE(posted_at)=DATE('now', 'localtime')
                 """
-            ).fetchone()["n"]
+            ).fetchone()
+            posted_count = int((posted_today["n"] if posted_today else 0) or 0)
 
-            pending = sum(1 for row in queue_items if row["status"] in {"scheduled", "rewritten"})
-            next_item = next((row for row in queue_items if row["status"] == "scheduled"), None)
+            pending_count = len(queued_rows)
+            next_item = next(
+                (
+                    row
+                    for row in queued_rows
+                    if row.get("scheduled_time")
+                ),
+                queued_rows[0] if queued_rows else None,
+            )
 
             return _success(
                 {
-                    "items": queue_items,
+                    "items": items,
                     "today": {
-                        "posted_count": int(posted_today or 0),
-                        "pending_count": int(pending),
-                        "next_scheduled_for": next_item["scheduled_for"] if next_item else None,
+                        "posted_count": posted_count,
+                        "pending_count": pending_count,
+                        "next_scheduled_for": next_item.get("scheduled_time") if next_item else None,
                     },
                 }
             )
@@ -292,47 +331,44 @@ def create_app() -> Flask:
         db = _open_db()
         try:
             article_id = article.get("id")
-
-            if isinstance(article_id, int):
-                post_id = article_id
-            else:
+            if not isinstance(article_id, int):
                 source_url = str(article.get("url") or "").strip()
                 title = str(article.get("title") or "Bài chưa đặt tiêu đề").strip()
+
                 if not source_url:
                     source_url = f"local://caption/{int(datetime.now().timestamp())}"
 
-                insert_item = {
-                    "source": str(article.get("source") or "manual").strip() or "manual",
+                normalized_article = {
                     "title": title,
-                    "summary": str(article.get("summary") or "").strip(),
                     "url": source_url,
+                    "source": str(article.get("source") or "manual").strip() or "manual",
+                    "summary": str(article.get("summary") or "").strip(),
                     "published_at": str(article.get("published_at") or datetime.now().isoformat()),
                 }
-                inserted = db.insert_crawled_post(insert_item)
-                if inserted is None:
-                    row = db.conn.execute(
-                        "SELECT id FROM posts WHERE source_url = ? LIMIT 1",
-                        (source_url,),
-                    ).fetchone()
-                    if row is None:
-                        return _error("Không thể thêm bài vào cơ sở dữ liệu", 500)
-                    post_id = int(row["id"])
+
+                saved_id = db.save_article(normalized_article)
+                if saved_id is not None:
+                    article_id = saved_id
                 else:
-                    post_id = inserted
+                    article_id = _get_article_id_by_url(db, source_url)
 
-            db.mark_rewritten(post_id, caption)
-            db.mark_scheduled(post_id, scheduled_for)
+                if not isinstance(article_id, int):
+                    return _error("Không thể xác định article_id để thêm queue", 500)
 
-            row = db.conn.execute(
-                "SELECT * FROM posts WHERE id = ? LIMIT 1",
-                (post_id,),
-            ).fetchone()
-            data = dict(row) if row else {"id": post_id}
+            post_id = db.add_to_queue(
+                article_id=article_id,
+                caption=caption,
+                scheduled_time=scheduled_for,
+                status="queued",
+            )
+            if post_id is None:
+                return _error("Không thể thêm vào hàng đợi", 500)
+
             return _success(
                 {
-                    "id": data.get("id", post_id),
-                    "status": data.get("status", "scheduled"),
-                    "scheduled_for": data.get("scheduled_for", scheduled_for),
+                    "id": post_id,
+                    "status": "scheduled",
+                    "scheduled_for": scheduled_for,
                 }
             )
         except Exception as exc:
@@ -345,21 +381,72 @@ def create_app() -> Flask:
     def api_post_now():
         payload = request.get_json(silent=True) or {}
         message = str(payload.get("caption") or "").strip()
-        post_id = payload.get("post_id")
+        image_url = payload.get("image_url")
+        queue_post_id = payload.get("post_id")
 
         if not message:
             return _error("Thiếu caption để đăng", 400)
 
         settings = get_settings()
-        poster = FacebookPoster(settings)
-        fb_post_id = poster.post_to_page(message)
-        if not fb_post_id:
-            return _error("Đăng Facebook thất bại. Kiểm tra cấu hình và quyền token.", 500)
+        result = post_to_page(
+            page_id=settings.page_id,
+            token=settings.access_token,
+            message=message,
+            image_url=str(image_url).strip() if isinstance(image_url, str) and image_url.strip() else None,
+        )
 
-        if isinstance(post_id, int):
+        if not result.get("ok"):
+            return _error(
+                "Đăng Facebook thất bại. Kiểm tra cấu hình và quyền token.",
+                500,
+                result.get("error") or result,
+            )
+
+        fb_post_id = str(result.get("post_id") or "")
+
+        if isinstance(queue_post_id, int):
             db = _open_db()
             try:
-                db.mark_posted(post_id, fb_post_id)
+                target_post_id: Optional[int] = None
+                by_id = db.conn.execute(
+                    "SELECT id FROM posts WHERE id = ? LIMIT 1",
+                    (queue_post_id,),
+                ).fetchone()
+                if by_id is not None:
+                    target_post_id = int(by_id["id"])
+                else:
+                    by_article = db.conn.execute(
+                        """
+                        SELECT id
+                        FROM posts
+                        WHERE article_id = ? AND status = 'queued'
+                        ORDER BY
+                            CASE WHEN scheduled_time IS NULL THEN 1 ELSE 0 END,
+                            scheduled_time ASC,
+                            id ASC
+                        LIMIT 1
+                        """,
+                        (queue_post_id,),
+                    ).fetchone()
+                    if by_article is not None:
+                        target_post_id = int(by_article["id"])
+
+                if target_post_id is None:
+                    logger.warning(
+                        "Cannot map post_id=%s to queued post row for status update",
+                        queue_post_id,
+                    )
+                    return _success({"facebook_post_id": fb_post_id})
+
+                posted_at = datetime.now().isoformat()
+                insights = get_post_insights(post_id=fb_post_id, token=settings.access_token)
+                db.update_post_status(
+                    post_id=target_post_id,
+                    status="posted",
+                    posted_at=posted_at,
+                    reach=int(insights.get("reach", 0)),
+                    engagement=int(insights.get("engagement", 0)),
+                )
             finally:
                 db.close()
 
@@ -369,79 +456,29 @@ def create_app() -> Flask:
     def api_stats():
         db = _open_db()
         try:
-            totals_row = db.conn.execute(
-                """
-                SELECT
-                    SUM(CASE WHEN status='posted' THEN 1 ELSE 0 END) AS posted_total,
-                    SUM(CASE WHEN status='scheduled' THEN 1 ELSE 0 END) AS scheduled_total,
-                    SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed_total,
-                    SUM(CASE WHEN status='crawled' THEN 1 ELSE 0 END) AS crawled_total
-                FROM posts
-                """
-            ).fetchone()
-            totals = dict(totals_row) if totals_row else {}
+            stats = db.get_stats(days=7)
+            summary = stats.get("summary", {})
+            timeline = stats.get("timeline", [])
 
-            last7 = [
-                dict(row)
-                for row in db.conn.execute(
+            article_total_row = db.conn.execute("SELECT COUNT(*) AS n FROM articles").fetchone()
+            article_total = int((article_total_row["n"] if article_total_row else 0) or 0)
+
+            by_hour_rows = db.conn.execute(
                 """
                 SELECT
-                    DATE(COALESCE(scheduled_for, updated_at)) AS day,
+                    strftime('%H:%M', posted_at) AS hour,
                     COUNT(*) AS total
                 FROM posts
-                WHERE status='posted'
-                  AND DATE(COALESCE(scheduled_for, updated_at)) >= DATE('now','-6 day')
-                GROUP BY day
-                ORDER BY day ASC
-                """
-                ).fetchall()
-            ]
-
-            by_hour = [
-                dict(row)
-                for row in db.conn.execute(
-                """
-                SELECT
-                    strftime('%H:%M', COALESCE(scheduled_for, updated_at)) AS hour,
-                    COUNT(*) AS total
-                FROM posts
-                WHERE status='posted'
-                GROUP BY hour
+                WHERE status='posted' AND posted_at IS NOT NULL
+                GROUP BY strftime('%H:%M', posted_at)
                 ORDER BY total DESC
                 LIMIT 5
                 """
-                ).fetchall()
-            ]
-
-            top_posts = [
-                dict(row)
-                for row in db.conn.execute(
-                """
-                SELECT title, source, COALESCE(scheduled_for, updated_at) AS posted_at
-                FROM posts
-                WHERE status='posted'
-                ORDER BY COALESCE(scheduled_for, updated_at) DESC
-                LIMIT 5
-                """
-                ).fetchall()
-            ]
-
-            top_sources = [
-                dict(row)
-                for row in db.conn.execute(
-                """
-                SELECT source, COUNT(*) AS posted_count
-                FROM posts
-                WHERE status='posted'
-                GROUP BY source
-                ORDER BY posted_count DESC
-                LIMIT 5
-                """
-                ).fetchall()
-            ]
+            ).fetchall()
+            by_hour = [dict(row) for row in by_hour_rows]
 
             max_hour_total = max([int(row["total"]) for row in by_hour], default=1)
-            hour_perf = [
+            hourly_perf = [
                 {
                     "hour": row["hour"] or "00:00",
                     "count": int(row["total"]),
@@ -450,36 +487,76 @@ def create_app() -> Flask:
                 for row in by_hour
             ]
 
-            return _success(
+            top_sources_rows = db.conn.execute(
+                """
+                SELECT
+                    a.source AS source,
+                    COUNT(*) AS posted_count
+                FROM posts p
+                LEFT JOIN articles a ON a.id = p.article_id
+                WHERE p.status='posted'
+                GROUP BY a.source
+                ORDER BY posted_count DESC
+                LIMIT 5
+                """
+            ).fetchall()
+            top_sources = [
                 {
-                    "summary": {
-                        "posted_total": int(totals.get("posted_total") or 0),
-                        "scheduled_total": int(totals.get("scheduled_total") or 0),
-                        "failed_total": int(totals.get("failed_total") or 0),
-                        "crawled_total": int(totals.get("crawled_total") or 0),
-                        "last7days_total": int(sum(int(row["total"]) for row in last7)),
-                    },
-                    "last7days": [
-                        {"day": row["day"], "count": int(row["total"])} for row in last7
-                    ],
-                    "hourly_performance": hour_perf,
-                    "top_posts": [
-                        {
-                            "title": row["title"],
-                            "source": row.get("source") or "unknown",
-                            "posted_at": row.get("posted_at"),
-                        }
-                        for row in top_posts
-                    ],
-                    "top_sources": [
-                        {
-                            "source": row.get("source") or "unknown",
-                            "posted_count": int(row["posted_count"]),
-                        }
-                        for row in top_sources
-                    ],
+                    "source": (row["source"] or "unknown"),
+                    "posted_count": int(row["posted_count"]),
                 }
-            )
+                for row in top_sources_rows
+            ]
+
+            top_posts_rows = db.conn.execute(
+                """
+                SELECT
+                    a.title AS title,
+                    a.source AS source,
+                    p.posted_at AS posted_at,
+                    p.reach AS reach,
+                    p.engagement AS engagement
+                FROM posts p
+                LEFT JOIN articles a ON a.id = p.article_id
+                WHERE p.status='posted'
+                ORDER BY p.reach DESC, p.engagement DESC, p.posted_at DESC
+                LIMIT 5
+                """
+            ).fetchall()
+            top_posts = [
+                {
+                    "title": row["title"] or "",
+                    "source": row["source"] or "unknown",
+                    "posted_at": row["posted_at"],
+                    "reach": int(row["reach"] or 0),
+                    "engagement": int(row["engagement"] or 0),
+                }
+                for row in top_posts_rows
+            ]
+
+            response = {
+                "summary": {
+                    "posted_total": int(summary.get("posted") or 0),
+                    "scheduled_total": int(summary.get("queued") or 0),
+                    "failed_total": int(summary.get("failed") or 0),
+                    "crawled_total": article_total,
+                    "last7days_total": int(sum(int(x.get("count") or 0) for x in timeline)),
+                    "reach_total": int(summary.get("reach") or 0),
+                    "engagement_total": int(summary.get("engagement") or 0),
+                },
+                "last7days": [
+                    {
+                        "day": row.get("day"),
+                        "count": int(row.get("count") or 0),
+                    }
+                    for row in timeline
+                ],
+                "hourly_performance": hourly_perf,
+                "top_posts": top_posts,
+                "top_sources": top_sources,
+            }
+
+            return _success(response)
         except Exception as exc:
             logger.exception("Failed to fetch stats: %s", exc)
             return _error("Không thể tải thống kê", 500, str(exc))
@@ -489,27 +566,57 @@ def create_app() -> Flask:
     @app.post("/api/config/save")
     def api_config_save():
         payload = request.get_json(silent=True) or {}
+
         page_id = str(payload.get("page_id") or "").strip()
         access_token = str(payload.get("access_token") or "").strip()
         claude_key = str(payload.get("claude_api_key") or "").strip()
 
-        if not page_id and not access_token and not claude_key:
-            return _error("Không có dữ liệu cấu hình để lưu", 400)
+        news_api_key = str(payload.get("news_api_key") or "").strip()
+
+        rss_urls_value = payload.get("rss_urls")
+        posting_times_value = payload.get("posting_times")
 
         values: Dict[str, str] = {}
         if page_id:
+            values["PAGE_ID"] = page_id
             values["FB_PAGE_ID"] = page_id
         if access_token:
+            values["ACCESS_TOKEN"] = access_token
             values["FB_PAGE_ACCESS_TOKEN"] = access_token
         if claude_key:
             values["CLAUDE_API_KEY"] = claude_key
+        if news_api_key:
+            values["NEWS_API_KEY"] = news_api_key
+            values["NEWSAPI_KEY"] = news_api_key
+
+        if isinstance(rss_urls_value, list):
+            rss_clean = [str(x).strip() for x in rss_urls_value if str(x).strip()]
+            if rss_clean:
+                values["RSS_URLS"] = ",".join(rss_clean)
+                values["RSS_FEEDS"] = values["RSS_URLS"]
+        elif isinstance(rss_urls_value, str) and rss_urls_value.strip():
+            values["RSS_URLS"] = ",".join(_parse_csv(rss_urls_value))
+            values["RSS_FEEDS"] = values["RSS_URLS"]
+
+        if isinstance(posting_times_value, list):
+            times = _parse_times(",".join(str(x).strip() for x in posting_times_value if str(x).strip())
+            )
+            if times:
+                values["POSTING_TIMES"] = ",".join(times)
+        elif isinstance(posting_times_value, str) and posting_times_value.strip():
+            times = _parse_times(posting_times_value)
+            if times:
+                values["POSTING_TIMES"] = ",".join(times)
+
+        if not values:
+            return _error("Không có dữ liệu cấu hình để lưu", 400)
 
         try:
             _save_env_values(values)
             for key, value in values.items():
                 os.environ[key] = value
-            get_settings.cache_clear()
-            _ = get_settings()
+
+            reload_config()
             return _success({"saved_keys": list(values.keys())})
         except Exception as exc:
             logger.exception("Failed to save config: %s", exc)
@@ -523,8 +630,8 @@ def create_app() -> Flask:
 
         return _success(
             {
-                "has_page_id": bool(settings.fb_page_id),
-                "has_access_token": bool(settings.fb_page_access_token),
+                "has_page_id": bool(settings.page_id),
+                "has_access_token": bool(settings.access_token),
                 "has_claude_key": bool(settings.claude_api_key),
                 "facebook": {"ok": fb_ok, "message": fb_message},
                 "claude": {"ok": claude_ok, "message": claude_message},
@@ -535,9 +642,9 @@ def create_app() -> Flask:
 
 
 def main() -> None:
-    settings = get_settings()
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
+        level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
