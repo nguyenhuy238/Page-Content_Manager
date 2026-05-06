@@ -14,7 +14,6 @@ import requests
 from bs4 import BeautifulSoup
 
 from .database import Database
-from .source_presets import NEWS_ARTICLES, default_youtube_channels
 
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
@@ -255,10 +254,4 @@ def resolve_source_lists(
 ) -> Tuple[List[str], List[str]]:
     final_youtube = [u.strip() for u in youtube_urls if str(u).strip()]
     final_articles = [u.strip() for u in article_urls if str(u).strip()]
-
-    if not final_youtube:
-        final_youtube = default_youtube_channels()
-    if not final_articles:
-        final_articles = list(NEWS_ARTICLES)
-
     return final_youtube, final_articles

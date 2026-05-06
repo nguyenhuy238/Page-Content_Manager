@@ -23,8 +23,7 @@ from .config import DB_PATH, get_settings, reload_config
 from .crawler import fetch_newsapi, fetch_rss
 from .database import Database
 from .fb_poster import GRAPH_VERSION, get_post_insights, post_to_page
-from .source_presets import get_source_groups
-from .source_collector import collect_article_urls, resolve_source_lists
+from .source_collector import collect_article_urls, collect_youtube_channels, resolve_source_lists
 
 logger = logging.getLogger(__name__)
 
@@ -217,12 +216,22 @@ def create_app() -> Flask:
             fetch_rss_enabled = _to_bool(payload.get("fetch_rss"), default=True)
             fetch_newsapi_enabled = _to_bool(payload.get("fetch_newsapi"), default=True)
             has_custom_urls_filter = "custom_news_urls" in payload
+            has_youtube_filter = "youtube_channel_urls" in payload
             requested_custom_urls = _to_str_list(payload.get("custom_news_urls"))
+            requested_youtube_urls = _to_str_list(payload.get("youtube_channel_urls"))
             selected_custom_urls = (
                 requested_custom_urls if has_custom_urls_filter else list(settings.custom_news_urls)
             )
+            selected_youtube_urls = (
+                requested_youtube_urls
+                if has_youtube_filter
+                else list(settings.youtube_channel_urls)
+            )
 
-            article_urls = [u.strip() for u in selected_custom_urls if str(u).strip()]
+            youtube_urls, article_urls = resolve_source_lists(
+                youtube_urls=[u.strip() for u in selected_youtube_urls if str(u).strip()],
+                article_urls=[u.strip() for u in selected_custom_urls if str(u).strip()],
+            )
             rss_items = fetch_rss(urls=settings.rss_urls, db=db) if fetch_rss_enabled else []
             news_items = (
                 fetch_newsapi(
@@ -235,28 +244,48 @@ def create_app() -> Flask:
                 if fetch_newsapi_enabled
                 else []
             )
+            youtube_items = (
+                collect_youtube_channels(
+                    channel_urls=youtube_urls,
+                    transcript_languages=list(settings.youtube_transcript_langs),
+                    max_videos_per_channel=max(1, int(settings.youtube_max_videos_per_channel)),
+                    db=db,
+                )
+                if _to_bool(payload.get("fetch_youtube"), default=True)
+                else []
+            )
             custom_url_items = collect_article_urls(article_urls, db=db) if article_urls else []
 
             inserted = 0
-            for article in rss_items + news_items + custom_url_items:
+            fetched_now: List[Dict[str, Any]] = []
+            for article in rss_items + news_items + youtube_items + custom_url_items:
                 article_id = db.save_article(article)
                 if article_id is not None:
                     inserted += 1
+                    fetched_now.append(
+                        {
+                            "id": article_id,
+                            "title": str(article.get("title") or ""),
+                            "url": str(article.get("url") or ""),
+                            "source": str(article.get("source") or "unknown"),
+                            "summary": str(article.get("summary") or ""),
+                            "published_at": str(
+                                article.get("published_at") or datetime.now().isoformat()
+                            ),
+                            "created_at": str(
+                                article.get("published_at") or datetime.now().isoformat()
+                            ),
+                            "used": False,
+                        }
+                    )
 
-            rows = db.conn.execute(
-                """
-                SELECT id, title, url, source, summary, fetched_at, used
-                FROM articles
-                ORDER BY fetched_at DESC
-                LIMIT 100
-                """
-            ).fetchall()
-            data = [_serialize_article(dict(row)) for row in rows]
+            data = fetched_now
 
             logger.info(
-                "Articles fetched: rss=%s newsapi=%s custom_urls=%s inserted=%s returned=%s",
+                "Articles fetched: rss=%s newsapi=%s youtube=%s custom_urls=%s inserted=%s returned_now=%s",
                 len(rss_items),
                 len(news_items),
+                len(youtube_items),
                 len(custom_url_items),
                 inserted,
                 len(data),
@@ -646,7 +675,11 @@ def create_app() -> Flask:
         access_token = str(payload.get("access_token") or "").strip()
         gemini_key = str(payload.get("gemini_api_key") or payload.get("claude_api_key") or "").strip()
 
+        has_news_api_key_field = "news_api_key" in payload
         news_api_key = str(payload.get("news_api_key") or "").strip()
+        news_keyword_value = str(payload.get("news_keyword") or "").strip()
+        news_language_value = str(payload.get("news_language") or "").strip()
+        news_page_size_value = payload.get("news_page_size")
         wp_base_url = str(payload.get("wp_base_url") or "").strip()
         wp_username = str(payload.get("wp_username") or "").strip()
         wp_app_password = str(payload.get("wp_app_password") or "").strip()
@@ -655,12 +688,20 @@ def create_app() -> Flask:
         custom_news_value = payload.get("custom_news_urls")
         has_youtube_channels_field = "youtube_channel_urls" in payload
         has_custom_news_field = "custom_news_urls" in payload
+        has_rss_urls_field = "rss_urls" in payload
+        has_news_keyword_field = "news_keyword" in payload
+        has_news_language_field = "news_language" in payload
+        has_news_page_size_field = "news_page_size" in payload
+        has_youtube_max_videos_field = "youtube_max_videos_per_channel" in payload
+        has_youtube_transcript_langs_field = "youtube_transcript_langs" in payload
 
         pipeline_dry_run_value = payload.get("pipeline_dry_run")
         pipeline_auto_fb_value = payload.get("pipeline_auto_post_facebook")
         pipeline_auto_wp_value = payload.get("pipeline_auto_post_wordpress")
 
         rss_urls_value = payload.get("rss_urls")
+        youtube_max_videos_value = payload.get("youtube_max_videos_per_channel")
+        youtube_transcript_langs_value = payload.get("youtube_transcript_langs")
         posting_times_value = payload.get("posting_times")
 
         values: Dict[str, str] = {}
@@ -672,9 +713,22 @@ def create_app() -> Flask:
             values["FB_PAGE_ACCESS_TOKEN"] = access_token
         if gemini_key:
             values["GEMINI_API_KEY"] = gemini_key
-        if news_api_key:
+        if has_news_api_key_field:
             values["NEWS_API_KEY"] = news_api_key
             values["NEWSAPI_KEY"] = news_api_key
+        if has_news_keyword_field:
+            values["NEWS_KEYWORD"] = news_keyword_value
+            values["NEWSAPI_QUERY"] = news_keyword_value
+        if has_news_language_field:
+            values["NEWS_LANGUAGE"] = news_language_value
+            values["NEWSAPI_LANGUAGE"] = news_language_value
+        if has_news_page_size_field:
+            try:
+                page_size = max(1, min(int(news_page_size_value), 100))
+            except Exception:
+                page_size = 10
+            values["NEWS_PAGE_SIZE"] = str(page_size)
+            values["NEWSAPI_PAGE_SIZE"] = str(page_size)
         if wp_base_url:
             values["WP_BASE_URL"] = wp_base_url
         if wp_username:
@@ -695,14 +749,17 @@ def create_app() -> Flask:
                 "true" if pipeline_auto_wp_value else "false"
             )
 
-        if isinstance(rss_urls_value, list):
-            rss_clean = [str(x).strip() for x in rss_urls_value if str(x).strip()]
-            if rss_clean:
+        if has_rss_urls_field:
+            if isinstance(rss_urls_value, list):
+                rss_clean = [str(x).strip() for x in rss_urls_value if str(x).strip()]
                 values["RSS_URLS"] = ",".join(rss_clean)
                 values["RSS_FEEDS"] = values["RSS_URLS"]
-        elif isinstance(rss_urls_value, str) and rss_urls_value.strip():
-            values["RSS_URLS"] = ",".join(_parse_csv(rss_urls_value))
-            values["RSS_FEEDS"] = values["RSS_URLS"]
+            elif isinstance(rss_urls_value, str):
+                values["RSS_URLS"] = ",".join(_parse_csv(rss_urls_value))
+                values["RSS_FEEDS"] = values["RSS_URLS"]
+            else:
+                values["RSS_URLS"] = ""
+                values["RSS_FEEDS"] = ""
 
         if has_youtube_channels_field:
             if isinstance(youtube_channels_value, list):
@@ -721,6 +778,28 @@ def create_app() -> Flask:
                 values["CUSTOM_NEWS_URLS"] = ",".join(_parse_csv(custom_news_value))
             else:
                 values["CUSTOM_NEWS_URLS"] = ""
+
+        if has_youtube_max_videos_field:
+            try:
+                max_videos = max(1, min(int(youtube_max_videos_value), 10))
+            except Exception:
+                max_videos = 2
+            values["YOUTUBE_MAX_VIDEOS_PER_CHANNEL"] = str(max_videos)
+
+        if has_youtube_transcript_langs_field:
+            if isinstance(youtube_transcript_langs_value, list):
+                langs_clean = [
+                    str(x).strip()
+                    for x in youtube_transcript_langs_value
+                    if str(x).strip()
+                ]
+                values["YOUTUBE_TRANSCRIPT_LANGS"] = ",".join(langs_clean)
+            elif isinstance(youtube_transcript_langs_value, str):
+                values["YOUTUBE_TRANSCRIPT_LANGS"] = ",".join(
+                    _parse_csv(youtube_transcript_langs_value)
+                )
+            else:
+                values["YOUTUBE_TRANSCRIPT_LANGS"] = ""
 
         if isinstance(posting_times_value, list):
             times = _parse_times(",".join(str(x).strip() for x in posting_times_value if str(x).strip())
@@ -767,9 +846,13 @@ def create_app() -> Flask:
                 ),
                 "has_openai_image_key": bool(settings.openai_api_key),
                 "pipeline_dry_run": bool(settings.pipeline_dry_run),
-                "source_groups": get_source_groups(),
                 "rss_urls": list(settings.rss_urls),
+                "news_keyword": settings.news_keyword,
+                "news_language": settings.news_language,
+                "news_page_size": int(settings.news_page_size),
                 "youtube_channel_urls": list(settings.youtube_channel_urls),
+                "youtube_max_videos_per_channel": int(settings.youtube_max_videos_per_channel),
+                "youtube_transcript_langs": list(settings.youtube_transcript_langs),
                 "custom_news_urls": list(settings.custom_news_urls),
                 "effective_source_urls": {
                     "youtube_channel_urls": effective_youtube_urls,

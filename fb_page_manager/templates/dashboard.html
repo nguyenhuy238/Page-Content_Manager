@@ -386,21 +386,7 @@
         <div class="card" style="flex:1">
           <div class="card-title">Hàng đợi bài chờ đăng</div>
           <div class="queue-list" id="queue-list">
-            <div class="queue-item">
-              <span class="queue-time">07:00</span>
-              <span class="queue-text">5 xu hướng AI đang thay đổi ngành lập trình...</span>
-              <span class="queue-status done">Đã đăng</span>
-            </div>
-            <div class="queue-item">
-              <span class="queue-time">11:30</span>
-              <span class="queue-text">ChatGPT vừa ra tính năng mới cực hot...</span>
-              <span class="queue-status wait">Đang chờ</span>
-            </div>
-            <div class="queue-item">
-              <span class="queue-time">20:00</span>
-              <span class="queue-text">Bài mới từ AI...</span>
-              <span class="queue-status sched">Đã lên lịch</span>
-            </div>
+            <div style="color:var(--color-text-tertiary);font-size:13px;padding:0.5rem 0;text-align:center">Chưa có dữ liệu hàng đợi</div>
           </div>
         </div>
       </div>
@@ -422,11 +408,11 @@
           <div style="display:flex;flex-direction:column;gap:6px;">
             <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary)">
               <span style="color:var(--color-text-secondary)">Bài đã đăng</span>
-              <span style="font-weight:500;color:var(--color-text-success)" id="posted-count">1 / 3</span>
+              <span style="font-weight:500;color:var(--color-text-success)" id="posted-count">0 / 0</span>
             </div>
             <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary)">
               <span style="color:var(--color-text-secondary)">Trong hàng đợi</span>
-              <span style="font-weight:500" id="queue-count">2 bài</span>
+              <span style="font-weight:500" id="queue-count">0 bài</span>
             </div>
             <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0">
               <span style="color:var(--color-text-secondary)">Bài tiếp theo</span>
@@ -492,12 +478,64 @@
           </div>
         </div>
         <div class="card">
+          <div class="card-title">NewsAPI</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div>
+              <div class="label">NewsAPI Key</div>
+              <input type="password" placeholder="Nhập key hoặc để trống để tắt NewsAPI" id="news-api-key-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;">
+              <div>
+                <div class="label">Từ khóa</div>
+                <input type="text" id="news-keyword-input" placeholder="technology" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+              </div>
+              <div>
+                <div class="label">Ngôn ngữ</div>
+                <input type="text" id="news-language-input" placeholder="en" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+              </div>
+              <div>
+                <div class="label">Số bài/lần</div>
+                <input type="number" id="news-page-size-input" min="1" max="100" value="10" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Nguồn RSS</div>
+          <div>
+            <div class="label">Danh sách RSS URL (mỗi dòng 1 link)</div>
+            <textarea id="rss-urls-input" class="prompt-textarea" style="min-height:120px" placeholder="https://example.com/rss&#10;https://example.com/feed.xml"></textarea>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Nguồn YouTube</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div>
+              <div class="label">Danh sách channel URL (mỗi dòng 1 link)</div>
+              <textarea id="youtube-channels-input" class="prompt-textarea" style="min-height:120px" placeholder="https://www.youtube.com/@channel/videos"></textarea>
+              <div style="font-size:12px;color:var(--color-text-secondary);margin-top:8px">
+                Nếu để trống, hệ thống sẽ không thu thập từ YouTube.
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;">
+              <div>
+                <div class="label">Video / channel</div>
+                <input type="number" id="youtube-max-videos-input" min="1" max="10" value="2" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+              </div>
+              <div>
+                <div class="label">Ngôn ngữ transcript (CSV)</div>
+                <input type="text" id="youtube-transcript-langs-input" placeholder="es,en" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
           <div class="card-title">Nguồn bài viết thủ công</div>
           <div>
             <div class="label">Danh sách URL nguồn tin (mỗi dòng 1 link)</div>
             <textarea id="custom-news-urls-input" class="prompt-textarea" style="min-height:140px" placeholder="https://example.com/article-1&#10;https://example.com/article-2"></textarea>
             <div style="font-size:12px;color:var(--color-text-secondary);margin-top:8px">
-              Nếu để trống, hệ thống sẽ dùng danh sách mặc định trong preset.
+              Nếu để trống, hệ thống sẽ không thu thập từ URL thủ công.
             </div>
           </div>
         </div>
@@ -714,8 +752,11 @@ function renderSourceList() {
 
   const cfg = state.sourceConfig || {};
   const rssUrls = Array.isArray(cfg.rss_urls) ? cfg.rss_urls : [];
-  const customUrls = Array.isArray(cfg.custom_news_urls)
-    ? cfg.custom_news_urls
+  const customUrls = Array.isArray(cfg.effective_source_urls?.article_urls)
+    ? cfg.effective_source_urls.article_urls
+    : [];
+  const youtubeUrls = Array.isArray(cfg.effective_source_urls?.youtube_channel_urls)
+    ? cfg.effective_source_urls.youtube_channel_urls
     : [];
 
   const rows = [];
@@ -728,6 +769,10 @@ function renderSourceList() {
     label: cfg.has_news_api_key ? "NewsAPI (đang bật)" : "NewsAPI (cần key)",
     type: "API",
     enabled: Boolean(cfg.has_news_api_key),
+  });
+
+  youtubeUrls.forEach((url) => {
+    rows.push({ label: url, type: "YouTube", enabled: true });
   });
 
   customUrls.forEach((url) => {
@@ -765,11 +810,15 @@ async function fetchArticles() {
       .map(([key]) => key);
     const hasRss = selectedRows.some((key) => key.startsWith("RSS::"));
     const hasNewsApi = selectedRows.some((key) => key.startsWith("API::"));
+    const hasYoutube = selectedRows.some((key) => key.startsWith("YouTube::"));
+    const selectedYoutubeUrls = selectedRows
+      .filter((key) => key.startsWith("YouTube::"))
+      .map((key) => key.slice("YouTube::".length));
     const selectedCustomUrls = selectedRows
       .filter((key) => key.startsWith("URL::"))
       .map((key) => key.slice("URL::".length));
 
-    if (!hasRss && !hasNewsApi && selectedCustomUrls.length === 0) {
+    if (!hasRss && !hasNewsApi && !hasYoutube && selectedCustomUrls.length === 0) {
       showToast("Vui lòng chọn ít nhất 1 nguồn tin", "error");
       list.innerHTML = '<div style="color:var(--color-text-tertiary);font-size:13px;padding:1rem 0;text-align:center">Chưa có nguồn được chọn để tải bài</div>';
       return;
@@ -780,6 +829,8 @@ async function fetchArticles() {
       body: JSON.stringify({
         fetch_rss: hasRss,
         fetch_newsapi: hasNewsApi,
+        fetch_youtube: hasYoutube,
+        youtube_channel_urls: selectedYoutubeUrls,
         custom_news_urls: selectedCustomUrls,
       }),
     });
@@ -1126,6 +1177,25 @@ async function saveConfig() {
   const pageId = document.getElementById("page-id-input").value.trim();
   const token = document.getElementById("token-input").value.trim();
   const geminiKey = document.getElementById("gemini-key-input").value.trim();
+  const newsApiKey = document.getElementById("news-api-key-input").value.trim();
+  const newsKeyword = document.getElementById("news-keyword-input").value.trim();
+  const newsLanguage = document.getElementById("news-language-input").value.trim();
+  const newsPageSize = Number(document.getElementById("news-page-size-input").value || "10");
+  const rssUrlsRaw = document.getElementById("rss-urls-input").value || "";
+  const rssUrls = rssUrlsRaw
+    .split(/\r?\n|,/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const youtubeChannelsRaw = document.getElementById("youtube-channels-input").value || "";
+  const youtubeChannels = youtubeChannelsRaw
+    .split(/\r?\n|,/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const youtubeMaxVideos = Number(document.getElementById("youtube-max-videos-input").value || "2");
+  const youtubeTranscriptLangs = (document.getElementById("youtube-transcript-langs-input").value || "")
+    .split(/\r?\n|,/)
+    .map((x) => x.trim())
+    .filter(Boolean);
   const customNewsUrlsRaw = document.getElementById("custom-news-urls-input").value || "";
   const customNewsUrls = customNewsUrlsRaw
     .split(/\r?\n|,/)
@@ -1139,6 +1209,14 @@ async function saveConfig() {
         page_id: pageId,
         access_token: token,
         gemini_api_key: geminiKey,
+        news_api_key: newsApiKey,
+        news_keyword: newsKeyword,
+        news_language: newsLanguage,
+        news_page_size: newsPageSize,
+        rss_urls: rssUrls,
+        youtube_channel_urls: youtubeChannels,
+        youtube_max_videos_per_channel: youtubeMaxVideos,
+        youtube_transcript_langs: youtubeTranscriptLangs,
         custom_news_urls: customNewsUrls,
       }),
     });
@@ -1165,6 +1243,19 @@ async function loadConfigStatus() {
 
     setHeaderStatus(overallOk, statusText);
     document.getElementById("post-now-btn").disabled = !(data.has_page_id && data.has_access_token);
+    document.getElementById("news-keyword-input").value = data.news_keyword || "";
+    document.getElementById("news-language-input").value = data.news_language || "";
+    document.getElementById("news-page-size-input").value = Number(data.news_page_size || 10);
+    document.getElementById("rss-urls-input").value = Array.isArray(data.rss_urls)
+      ? data.rss_urls.join("\n")
+      : "";
+    document.getElementById("youtube-channels-input").value = Array.isArray(data.youtube_channel_urls)
+      ? data.youtube_channel_urls.join("\n")
+      : "";
+    document.getElementById("youtube-max-videos-input").value = Number(data.youtube_max_videos_per_channel || 2);
+    document.getElementById("youtube-transcript-langs-input").value = Array.isArray(data.youtube_transcript_langs)
+      ? data.youtube_transcript_langs.join(",")
+      : "";
     document.getElementById("custom-news-urls-input").value = Array.isArray(data.custom_news_urls)
       ? data.custom_news_urls.join("\n")
       : "";
