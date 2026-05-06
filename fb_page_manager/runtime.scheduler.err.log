@@ -1,0 +1,4 @@
+2026-05-06 10:31:26,886 | INFO | fb_page_manager.scheduler | Registered posting slot: 07:00
+2026-05-06 10:31:26,886 | INFO | fb_page_manager.scheduler | Registered posting slot: 11:30
+2026-05-06 10:31:26,887 | INFO | fb_page_manager.scheduler | Registered posting slot: 20:00
+2026-05-06 10:31:26,887 | INFO | fb_page_manager.scheduler | Scheduler loop started with slots: 07:00, 11:30, 20:00

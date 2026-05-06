@@ -8,19 +8,23 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from anthropic import Anthropic
+import google.generativeai as genai
 from flask import Flask, jsonify, render_template, request
 
 from .ai_writer import generate_caption, quality_check
+from .campaign_pipeline import CampaignAutomationPipeline
 from .config import DB_PATH, get_settings, reload_config
 from .crawler import fetch_newsapi, fetch_rss
 from .database import Database
 from .fb_poster import GRAPH_VERSION, get_post_insights, post_to_page
+from .source_presets import get_source_groups
+from .source_collector import collect_article_urls, resolve_source_lists
 
 logger = logging.getLogger(__name__)
 
@@ -128,20 +132,20 @@ def _try_fb_status() -> Tuple[bool, str]:
         return False, f"Facebook API lỗi: {exc}"
 
 
-def _try_claude_status() -> Tuple[bool, str]:
+def _try_gemini_status() -> Tuple[bool, str]:
     settings = get_settings()
-    if not settings.claude_api_key:
-        return False, "Thiếu CLAUDE_API_KEY"
+    if not settings.gemini_api_key:
+        return False, "Thiếu GEMINI_API_KEY"
 
     try:
-        client = Anthropic(api_key=settings.claude_api_key)
-        models_page = client.models.list(limit=1)
-        if not bool(getattr(models_page, "data", [])):
-            return False, "Claude API trả danh sách model rỗng"
-        return True, "Kết nối Claude API OK"
+        genai.configure(api_key=settings.gemini_api_key)
+        models = list(genai.list_models())
+        if not models:
+            return False, "Gemini API trả danh sách model rỗng"
+        return True, "Kết nối Gemini API OK"
     except Exception as exc:
-        logger.exception("Claude status check failed: %s", exc)
-        return False, f"Claude API lỗi: {exc}"
+        logger.exception("Gemini status check failed: %s", exc)
+        return False, f"Gemini API lỗi: {exc}"
 
 
 def _parse_csv(value: str) -> List[str]:
@@ -160,6 +164,28 @@ def _parse_times(value: str) -> List[str]:
         except Exception:
             continue
     return valid
+
+
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
+def _to_str_list(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return []
 
 
 def _get_article_id_by_url(db: Database, url: str) -> Optional[int]:
@@ -181,22 +207,38 @@ def create_app() -> Flask:
         return render_template("dashboard.html")
 
     @app.get("/api/articles")
+    @app.post("/api/articles")
     def api_articles():
         settings = get_settings()
         db = _open_db()
 
         try:
-            rss_items = fetch_rss(urls=settings.rss_urls, db=db)
-            news_items = fetch_newsapi(
-                keyword=settings.news_keyword,
-                api_key=settings.news_api_key,
-                db=db,
-                language=settings.news_language,
-                page_size=settings.news_page_size,
+            payload = request.get_json(silent=True) or {}
+            fetch_rss_enabled = _to_bool(payload.get("fetch_rss"), default=True)
+            fetch_newsapi_enabled = _to_bool(payload.get("fetch_newsapi"), default=True)
+            has_custom_urls_filter = "custom_news_urls" in payload
+            requested_custom_urls = _to_str_list(payload.get("custom_news_urls"))
+            selected_custom_urls = (
+                requested_custom_urls if has_custom_urls_filter else list(settings.custom_news_urls)
             )
 
+            article_urls = [u.strip() for u in selected_custom_urls if str(u).strip()]
+            rss_items = fetch_rss(urls=settings.rss_urls, db=db) if fetch_rss_enabled else []
+            news_items = (
+                fetch_newsapi(
+                    keyword=settings.news_keyword,
+                    api_key=settings.news_api_key,
+                    db=db,
+                    language=settings.news_language,
+                    page_size=settings.news_page_size,
+                )
+                if fetch_newsapi_enabled
+                else []
+            )
+            custom_url_items = collect_article_urls(article_urls, db=db) if article_urls else []
+
             inserted = 0
-            for article in rss_items + news_items:
+            for article in rss_items + news_items + custom_url_items:
                 article_id = db.save_article(article)
                 if article_id is not None:
                     inserted += 1
@@ -212,9 +254,10 @@ def create_app() -> Flask:
             data = [_serialize_article(dict(row)) for row in rows]
 
             logger.info(
-                "Articles fetched: rss=%s newsapi=%s inserted=%s returned=%s",
+                "Articles fetched: rss=%s newsapi=%s custom_urls=%s inserted=%s returned=%s",
                 len(rss_items),
                 len(news_items),
+                len(custom_url_items),
                 inserted,
                 len(data),
             )
@@ -563,15 +606,59 @@ def create_app() -> Flask:
         finally:
             db.close()
 
+    @app.post("/api/campaign/run")
+    def api_campaign_run():
+        payload = request.get_json(silent=True) or {}
+        limit = payload.get("limit", 4)
+        dry_run = payload.get("dry_run", None)
+
+        settings = get_settings()
+        if isinstance(dry_run, bool):
+            settings = replace(settings, pipeline_dry_run=dry_run)
+
+        try:
+            pipeline = CampaignAutomationPipeline(settings=settings)
+            result = pipeline.run_once(limit=max(1, int(limit)))
+            if not result.get("ok"):
+                return _error("Campaign pipeline thất bại", 500, result.get("error"))
+            return _success(result)
+        except Exception as exc:
+            logger.exception("Campaign run failed: %s", exc)
+            return _error("Không thể chạy campaign pipeline", 500, str(exc))
+
+    @app.get("/api/campaign/recent")
+    def api_campaign_recent():
+        db = _open_db()
+        try:
+            rows = db.get_recent_campaigns(limit=50)
+            return _success(rows)
+        except Exception as exc:
+            logger.exception("Failed to load campaign history: %s", exc)
+            return _error("Không thể tải lịch sử campaign", 500, str(exc))
+        finally:
+            db.close()
+
     @app.post("/api/config/save")
     def api_config_save():
         payload = request.get_json(silent=True) or {}
 
         page_id = str(payload.get("page_id") or "").strip()
         access_token = str(payload.get("access_token") or "").strip()
-        claude_key = str(payload.get("claude_api_key") or "").strip()
+        gemini_key = str(payload.get("gemini_api_key") or payload.get("claude_api_key") or "").strip()
 
         news_api_key = str(payload.get("news_api_key") or "").strip()
+        wp_base_url = str(payload.get("wp_base_url") or "").strip()
+        wp_username = str(payload.get("wp_username") or "").strip()
+        wp_app_password = str(payload.get("wp_app_password") or "").strip()
+        openai_api_key = str(payload.get("openai_api_key") or "").strip()
+        youtube_channels_value = payload.get("youtube_channel_urls")
+        custom_news_value = payload.get("custom_news_urls")
+        has_youtube_channels_field = "youtube_channel_urls" in payload
+        has_custom_news_field = "custom_news_urls" in payload
+
+        pipeline_dry_run_value = payload.get("pipeline_dry_run")
+        pipeline_auto_fb_value = payload.get("pipeline_auto_post_facebook")
+        pipeline_auto_wp_value = payload.get("pipeline_auto_post_wordpress")
 
         rss_urls_value = payload.get("rss_urls")
         posting_times_value = payload.get("posting_times")
@@ -583,11 +670,30 @@ def create_app() -> Flask:
         if access_token:
             values["ACCESS_TOKEN"] = access_token
             values["FB_PAGE_ACCESS_TOKEN"] = access_token
-        if claude_key:
-            values["CLAUDE_API_KEY"] = claude_key
+        if gemini_key:
+            values["GEMINI_API_KEY"] = gemini_key
         if news_api_key:
             values["NEWS_API_KEY"] = news_api_key
             values["NEWSAPI_KEY"] = news_api_key
+        if wp_base_url:
+            values["WP_BASE_URL"] = wp_base_url
+        if wp_username:
+            values["WP_USERNAME"] = wp_username
+        if wp_app_password:
+            values["WP_APP_PASSWORD"] = wp_app_password
+        if openai_api_key:
+            values["OPENAI_API_KEY"] = openai_api_key
+
+        if isinstance(pipeline_dry_run_value, bool):
+            values["PIPELINE_DRY_RUN"] = "true" if pipeline_dry_run_value else "false"
+        if isinstance(pipeline_auto_fb_value, bool):
+            values["PIPELINE_AUTO_POST_FACEBOOK"] = (
+                "true" if pipeline_auto_fb_value else "false"
+            )
+        if isinstance(pipeline_auto_wp_value, bool):
+            values["PIPELINE_AUTO_POST_WORDPRESS"] = (
+                "true" if pipeline_auto_wp_value else "false"
+            )
 
         if isinstance(rss_urls_value, list):
             rss_clean = [str(x).strip() for x in rss_urls_value if str(x).strip()]
@@ -597,6 +703,24 @@ def create_app() -> Flask:
         elif isinstance(rss_urls_value, str) and rss_urls_value.strip():
             values["RSS_URLS"] = ",".join(_parse_csv(rss_urls_value))
             values["RSS_FEEDS"] = values["RSS_URLS"]
+
+        if has_youtube_channels_field:
+            if isinstance(youtube_channels_value, list):
+                yt_clean = [str(x).strip() for x in youtube_channels_value if str(x).strip()]
+                values["YOUTUBE_CHANNEL_URLS"] = ",".join(yt_clean)
+            elif isinstance(youtube_channels_value, str):
+                values["YOUTUBE_CHANNEL_URLS"] = ",".join(_parse_csv(youtube_channels_value))
+            else:
+                values["YOUTUBE_CHANNEL_URLS"] = ""
+
+        if has_custom_news_field:
+            if isinstance(custom_news_value, list):
+                news_clean = [str(x).strip() for x in custom_news_value if str(x).strip()]
+                values["CUSTOM_NEWS_URLS"] = ",".join(news_clean)
+            elif isinstance(custom_news_value, str):
+                values["CUSTOM_NEWS_URLS"] = ",".join(_parse_csv(custom_news_value))
+            else:
+                values["CUSTOM_NEWS_URLS"] = ""
 
         if isinstance(posting_times_value, list):
             times = _parse_times(",".join(str(x).strip() for x in posting_times_value if str(x).strip())
@@ -626,15 +750,33 @@ def create_app() -> Flask:
     def api_config_status():
         settings = get_settings()
         fb_ok, fb_message = _try_fb_status()
-        claude_ok, claude_message = _try_claude_status()
+        gemini_ok, gemini_message = _try_gemini_status()
+        effective_youtube_urls, effective_article_urls = resolve_source_lists(
+            youtube_urls=list(settings.youtube_channel_urls),
+            article_urls=list(settings.custom_news_urls),
+        )
 
         return _success(
             {
                 "has_page_id": bool(settings.page_id),
                 "has_access_token": bool(settings.access_token),
-                "has_claude_key": bool(settings.claude_api_key),
+                "has_gemini_key": bool(settings.gemini_api_key),
+                "has_news_api_key": bool(settings.news_api_key),
+                "has_wp_config": bool(
+                    settings.wp_base_url and settings.wp_username and settings.wp_app_password
+                ),
+                "has_openai_image_key": bool(settings.openai_api_key),
+                "pipeline_dry_run": bool(settings.pipeline_dry_run),
+                "source_groups": get_source_groups(),
+                "rss_urls": list(settings.rss_urls),
+                "youtube_channel_urls": list(settings.youtube_channel_urls),
+                "custom_news_urls": list(settings.custom_news_urls),
+                "effective_source_urls": {
+                    "youtube_channel_urls": effective_youtube_urls,
+                    "article_urls": effective_article_urls,
+                },
                 "facebook": {"ok": fb_ok, "message": fb_message},
-                "claude": {"ok": claude_ok, "message": claude_message},
+                "gemini": {"ok": gemini_ok, "message": gemini_message},
             }
         )
 

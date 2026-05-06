@@ -64,6 +64,27 @@ class Database:
                     )
                     """
                 )
+                self.conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS campaigns (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        article_id INTEGER,
+                        source_url TEXT NOT NULL,
+                        source_type TEXT NOT NULL,
+                        headline TEXT,
+                        package_json TEXT,
+                        image_path TEXT,
+                        wordpress_post_id INTEGER,
+                        wordpress_url TEXT,
+                        facebook_post_id TEXT,
+                        facebook_comment_id TEXT,
+                        status TEXT NOT NULL DEFAULT 'generated',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT,
+                        FOREIGN KEY(article_id) REFERENCES articles(id)
+                    )
+                    """
+                )
         except Exception as exc:
             logger.exception("Failed to initialize database schema: %s", exc)
             raise
@@ -301,6 +322,136 @@ class Database:
             self.conn.close()
         except Exception as exc:
             logger.exception("Failed to close DB connection: %s", exc)
+
+    def create_campaign(
+        self,
+        *,
+        article_id: Optional[int],
+        source_url: str,
+        source_type: str,
+        headline: str,
+        package_json: str,
+        status: str = "generated",
+    ) -> Optional[int]:
+        try:
+            with self.conn:
+                cur = self.conn.execute(
+                    """
+                    INSERT INTO campaigns (
+                        article_id,
+                        source_url,
+                        source_type,
+                        headline,
+                        package_json,
+                        status,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        article_id,
+                        source_url,
+                        source_type,
+                        headline,
+                        package_json,
+                        status,
+                        utc_now_iso(),
+                        utc_now_iso(),
+                    ),
+                )
+            return int(cur.lastrowid)
+        except Exception as exc:
+            logger.exception("Failed to create campaign: %s", exc)
+            return None
+
+    def update_campaign_result(
+        self,
+        campaign_id: int,
+        *,
+        image_path: Optional[str] = None,
+        wordpress_post_id: Optional[int] = None,
+        wordpress_url: Optional[str] = None,
+        facebook_post_id: Optional[str] = None,
+        facebook_comment_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> bool:
+        try:
+            existing = self.conn.execute(
+                """
+                SELECT image_path, wordpress_post_id, wordpress_url, facebook_post_id,
+                       facebook_comment_id, status
+                FROM campaigns
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (campaign_id,),
+            ).fetchone()
+            if existing is None:
+                logger.warning("Campaign id=%s not found", campaign_id)
+                return False
+
+            final_image_path = image_path if image_path is not None else existing["image_path"]
+            final_wp_post_id = (
+                int(wordpress_post_id)
+                if wordpress_post_id is not None
+                else existing["wordpress_post_id"]
+            )
+            final_wp_url = wordpress_url if wordpress_url is not None else existing["wordpress_url"]
+            final_fb_post_id = (
+                str(facebook_post_id) if facebook_post_id is not None else existing["facebook_post_id"]
+            )
+            final_fb_comment_id = (
+                str(facebook_comment_id)
+                if facebook_comment_id is not None
+                else existing["facebook_comment_id"]
+            )
+            final_status = status if status is not None else existing["status"]
+
+            with self.conn:
+                self.conn.execute(
+                    """
+                    UPDATE campaigns
+                    SET image_path = ?,
+                        wordpress_post_id = ?,
+                        wordpress_url = ?,
+                        facebook_post_id = ?,
+                        facebook_comment_id = ?,
+                        status = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        final_image_path,
+                        final_wp_post_id,
+                        final_wp_url,
+                        final_fb_post_id,
+                        final_fb_comment_id,
+                        final_status,
+                        utc_now_iso(),
+                        campaign_id,
+                    ),
+                )
+            return True
+        except Exception as exc:
+            logger.exception("Failed to update campaign id=%s: %s", campaign_id, exc)
+            return False
+
+    def get_recent_campaigns(self, limit: int = 30) -> List[Dict[str, Any]]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT *
+                FROM campaigns
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            logger.exception("Failed to get recent campaigns: %s", exc)
+            return []
 
 
 @contextmanager

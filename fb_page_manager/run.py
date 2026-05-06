@@ -4,11 +4,12 @@ import argparse
 import logging
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Tuple
 
 import requests
-from anthropic import Anthropic
+import google.generativeai as genai
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SRC_PATH = PROJECT_ROOT / "src"
@@ -16,7 +17,9 @@ if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
 from fb_page_manager.config import get_settings
+from fb_page_manager.campaign_pipeline import CampaignAutomationPipeline
 from fb_page_manager.crawler import Crawler, fetch_newsapi, fetch_rss
+from fb_page_manager.source_collector import collect_article_urls, resolve_source_lists
 from fb_page_manager.scheduler import run_scheduler
 from fb_page_manager.web_server import create_app
 
@@ -56,20 +59,19 @@ def run_fetch_once() -> int:
         return 1
 
 
-def _test_claude() -> Tuple[bool, str]:
+def _test_gemini() -> Tuple[bool, str]:
     settings = get_settings()
-    if not settings.claude_api_key:
-        return False, "CLAUDE_API_KEY đang trống"
+    if not settings.gemini_api_key:
+        return False, "GEMINI_API_KEY đang trống"
 
     try:
-        client = Anthropic(api_key=settings.claude_api_key)
-        result = client.models.list(limit=1)
-        has_data = bool(getattr(result, "data", []))
-        if has_data:
-            return True, "Claude API: OK"
-        return False, "Claude API: phản hồi rỗng"
+        genai.configure(api_key=settings.gemini_api_key)
+        models = list(genai.list_models())
+        if models:
+            return True, "Gemini API: OK"
+        return False, "Gemini API: phản hồi rỗng"
     except Exception as exc:
-        return False, f"Claude API lỗi: {exc}"
+        return False, f"Gemini API lỗi: {exc}"
 
 
 def _test_facebook() -> Tuple[bool, str]:
@@ -95,12 +97,15 @@ def _test_facebook() -> Tuple[bool, str]:
 
 def _test_news_sources() -> Tuple[bool, str]:
     settings = get_settings()
-    if not settings.rss_urls:
-        return False, "RSS_URLS đang trống"
 
     try:
+        _, article_urls = resolve_source_lists(
+            youtube_urls=[],
+            article_urls=list(settings.custom_news_urls),
+        )
         rss_items = fetch_rss(settings.rss_urls)
-        parts = [f"RSS={len(rss_items)} bài"]
+        custom_url_items = collect_article_urls(article_urls)
+        parts = [f"RSS={len(rss_items)} bài", f"URL={len(custom_url_items)} bài"]
 
         if settings.news_api_key:
             news_items = fetch_newsapi(
@@ -113,6 +118,9 @@ def _test_news_sources() -> Tuple[bool, str]:
         else:
             parts.append("NEWS_API_KEY trống (bỏ qua NewsAPI)")
 
+        if not settings.rss_urls and not settings.custom_news_urls and not settings.news_api_key:
+            return False, "Chưa cấu hình nguồn RSS, URL hoặc NewsAPI"
+
         return True, "Nguồn tin: " + " | ".join(parts)
     except Exception as exc:
         return False, f"Nguồn tin lỗi: {exc}"
@@ -123,7 +131,7 @@ def run_test_connections() -> int:
 
     checks = [
         ("Facebook", _test_facebook),
-        ("Claude", _test_claude),
+        ("Gemini", _test_gemini),
         ("Sources", _test_news_sources),
     ]
 
@@ -139,12 +147,44 @@ def run_test_connections() -> int:
     return 1 if has_error else 0
 
 
+def run_campaign(limit: int, live: bool) -> int:
+    logger = logging.getLogger("run.campaign")
+    settings = get_settings()
+    if live and settings.pipeline_dry_run:
+        settings = replace(settings, pipeline_dry_run=False)
+
+    pipeline = CampaignAutomationPipeline(settings=settings)
+    result = pipeline.run_once(limit=limit)
+    if not result.get("ok"):
+        logger.error("Campaign pipeline failed: %s", result.get("error"))
+        return 1
+
+    summary = result.get("summary", {})
+    logger.info(
+        "Campaign pipeline done | dry_run=%s | candidates=%s generated=%s wp=%s fb=%s comments=%s failed=%s",
+        result.get("dry_run"),
+        summary.get("candidates", 0),
+        summary.get("generated", 0),
+        summary.get("wp_posted", 0),
+        summary.get("fb_posted", 0),
+        summary.get("comments_posted", 0),
+        summary.get("failed", 0),
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="FB Page Manager runner")
     parser.add_argument(
         "mode",
-        choices=["web", "scheduler", "fetch", "test"],
-        help="Mode: web | scheduler | fetch | test",
+        choices=["web", "scheduler", "fetch", "test", "campaign"],
+        help="Mode: web | scheduler | fetch | test | campaign",
+    )
+    parser.add_argument("--limit", type=int, default=4, help="Max stories to process in campaign mode")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Force campaign mode to run live even when PIPELINE_DRY_RUN=true",
     )
     return parser
 
@@ -162,6 +202,8 @@ def main() -> int:
         return run_fetch_once()
     if args.mode == "test":
         return run_test_connections()
+    if args.mode == "campaign":
+        return run_campaign(limit=max(1, int(args.limit)), live=bool(args.live))
 
     return 1
 

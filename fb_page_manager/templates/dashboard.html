@@ -77,6 +77,13 @@
   }
 
   .source-list { display: flex; flex-direction: column; gap: 6px; }
+  .source-actions { display:flex; gap:8px; margin-bottom:8px; }
+  .source-action-btn {
+    padding: 5px 9px; font-size: 12px; border-radius: 8px;
+    border: 0.5px solid var(--color-border-secondary);
+    background: var(--color-background-primary); color: var(--color-text-secondary);
+    cursor: pointer; font-family: var(--font-sans);
+  }
   .source-item {
     display: flex; align-items: center; gap: 8px;
     padding: 7px 10px; border-radius: var(--border-radius-md);
@@ -248,12 +255,12 @@
       <div class="panel">
         <div class="card">
           <div class="card-title">Nguồn tin tức</div>
-          <div class="source-list">
-            <div class="source-item"><span class="source-dot"></span>VnExpress Công nghệ (RSS)<span class="source-badge">RSS</span></div>
-            <div class="source-item"><span class="source-dot"></span>Genk.vn<span class="source-badge">RSS</span></div>
-            <div class="source-item"><span class="source-dot"></span>TechCrunch<span class="source-badge">RSS</span></div>
-            <div class="source-item"><span class="source-dot off"></span>NewsAPI (cần key)<span class="source-badge" style="background:var(--color-background-warning);color:var(--color-text-warning)">API</span></div>
-            <div class="source-item"><span class="source-dot off"></span>The Verge<span class="source-badge" style="background:var(--color-background-secondary);color:var(--color-text-secondary)">tắt</span></div>
+          <div class="source-actions">
+            <button class="source-action-btn" onclick="selectAllSources()">Chọn tất cả</button>
+            <button class="source-action-btn" onclick="clearAllSources()">Bỏ chọn tất cả</button>
+          </div>
+          <div class="source-list" id="source-list">
+            <div class="source-item"><span class="source-dot off"></span>Đang tải danh sách nguồn...<span class="source-badge">...</span></div>
           </div>
           <button class="fetch-btn" id="fetch-btn" onclick="fetchArticles()">Tải bài mới nhất</button>
         </div>
@@ -478,10 +485,20 @@
           </div>
         </div>
         <div class="card">
-          <div class="card-title">Claude API</div>
+          <div class="card-title">Gemini API</div>
           <div>
-            <div class="label">API Key (từ console.anthropic.com)</div>
-            <input type="password" placeholder="sk-ant-api..." id="claude-key-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+            <div class="label">API Key (từ aistudio.google.com)</div>
+            <input type="password" placeholder="AIzaSy..." id="gemini-key-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Nguồn bài viết thủ công</div>
+          <div>
+            <div class="label">Danh sách URL nguồn tin (mỗi dòng 1 link)</div>
+            <textarea id="custom-news-urls-input" class="prompt-textarea" style="min-height:140px" placeholder="https://example.com/article-1&#10;https://example.com/article-2"></textarea>
+            <div style="font-size:12px;color:var(--color-text-secondary);margin-top:8px">
+              Nếu để trống, hệ thống sẽ dùng danh sách mặc định trong preset.
+            </div>
           </div>
         </div>
         <button class="fetch-btn" onclick="saveConfig()">Lưu cấu hình</button>
@@ -491,7 +508,7 @@
             1. Vào <strong style="color:var(--color-text-primary)">developers.facebook.com</strong> → tạo App<br>
             2. Graph API Explorer → chọn Page → cấp quyền <code style="background:var(--color-background-secondary);padding:1px 5px;border-radius:4px;font-size:12px">pages_manage_posts</code><br>
             3. Generate → Exchange lấy Long-lived Token (60 ngày)<br>
-            4. Vào <strong style="color:var(--color-text-primary)">console.anthropic.com</strong> → API Keys → tạo key mới
+            4. Vào <strong style="color:var(--color-text-primary)">aistudio.google.com</strong> → API Keys → tạo key mới
           </div>
           <button class="fetch-btn" style="margin-top:10px;background:none;border:0.5px solid var(--color-border-secondary);color:var(--color-text-primary)" onclick="sendPrompt('Hướng dẫn từng bước chi tiết cách lấy Facebook Page Access Token Long-lived và tích hợp vào Python script')">
             Hướng dẫn chi tiết ↗
@@ -513,6 +530,8 @@ const state = {
   queue: [],
   queueToday: { posted_count: 0, pending_count: 0, next_scheduled_for: null },
   stats: null,
+  sourceConfig: null,
+  sourceSelections: {},
 };
 
 function showToast(message, type = "info") {
@@ -590,6 +609,8 @@ function switchTab(tab) {
     loadQueue();
   } else if (tab === "stats") {
     loadStats();
+  } else if (tab === "collect") {
+    loadConfigStatus();
   } else if (tab === "setup") {
     loadConfigStatus();
   }
@@ -648,6 +669,89 @@ function renderArticles() {
   count.textContent = `· ${state.articles.length} bài`;
 }
 
+function sourceBadgeStyle(type) {
+  if (type === "API") return "background:var(--color-background-warning);color:var(--color-text-warning)";
+  if (type === "URL") return "background:var(--color-background-info);color:var(--color-text-info)";
+  if (type === "YouTube") return "background:var(--color-background-secondary);color:var(--color-text-secondary)";
+  return "";
+}
+
+function sourceKey(item) {
+  return `${item.type}::${item.label}`;
+}
+
+function ensureSourceSelectionDefaults(rows) {
+  const current = state.sourceSelections || {};
+  const next = {};
+  rows.forEach((item) => {
+    const key = sourceKey(item);
+    next[key] = Object.prototype.hasOwnProperty.call(current, key) ? Boolean(current[key]) : Boolean(item.enabled);
+  });
+  state.sourceSelections = next;
+}
+
+function setSourceSelected(key, selected) {
+  state.sourceSelections[key] = Boolean(selected);
+}
+
+function selectAllSources() {
+  Object.keys(state.sourceSelections || {}).forEach((k) => {
+    state.sourceSelections[k] = true;
+  });
+  renderSourceList();
+}
+
+function clearAllSources() {
+  Object.keys(state.sourceSelections || {}).forEach((k) => {
+    state.sourceSelections[k] = false;
+  });
+  renderSourceList();
+}
+
+function renderSourceList() {
+  const root = document.getElementById("source-list");
+  if (!root) return;
+
+  const cfg = state.sourceConfig || {};
+  const rssUrls = Array.isArray(cfg.rss_urls) ? cfg.rss_urls : [];
+  const customUrls = Array.isArray(cfg.custom_news_urls)
+    ? cfg.custom_news_urls
+    : [];
+
+  const rows = [];
+
+  rssUrls.forEach((url) => {
+    rows.push({ label: url, type: "RSS", enabled: true });
+  });
+
+  rows.push({
+    label: cfg.has_news_api_key ? "NewsAPI (đang bật)" : "NewsAPI (cần key)",
+    type: "API",
+    enabled: Boolean(cfg.has_news_api_key),
+  });
+
+  customUrls.forEach((url) => {
+    rows.push({ label: url, type: "URL", enabled: true });
+  });
+
+  ensureSourceSelectionDefaults(rows);
+
+  if (!rows.length) {
+    root.innerHTML = '<div class="source-item"><span class="source-dot off"></span>Chưa có nguồn nào được cấu hình<span class="source-badge">none</span></div>';
+    return;
+  }
+
+  root.innerHTML = rows
+    .map((item) => {
+      const key = sourceKey(item);
+      const isChecked = Boolean(state.sourceSelections[key]);
+      const dotClass = item.enabled && isChecked ? "source-dot" : "source-dot off";
+      const badgeStyle = sourceBadgeStyle(item.type);
+      return `<label class="source-item"><input type="checkbox" ${isChecked ? "checked" : ""} onchange="setSourceSelected('${key.replace(/'/g, "\\'")}', this.checked)"><span class="${dotClass}"></span>${item.label}<span class="source-badge" style="${badgeStyle}">${item.type}</span></label>`;
+    })
+    .join("");
+}
+
 async function fetchArticles() {
   const btn = document.getElementById("fetch-btn");
   const list = document.getElementById("articles-list");
@@ -656,7 +760,29 @@ async function fetchArticles() {
   list.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;padding:1rem 0;text-align:center"><span class="loading-spin" style="border-top-color:#1877F2;border-color:rgba(24,119,242,0.2)"></span>Đang thu thập dữ liệu...</div>';
 
   try {
-    const articles = await apiFetch("/api/articles");
+    const selectedRows = Object.entries(state.sourceSelections || {})
+      .filter(([, checked]) => Boolean(checked))
+      .map(([key]) => key);
+    const hasRss = selectedRows.some((key) => key.startsWith("RSS::"));
+    const hasNewsApi = selectedRows.some((key) => key.startsWith("API::"));
+    const selectedCustomUrls = selectedRows
+      .filter((key) => key.startsWith("URL::"))
+      .map((key) => key.slice("URL::".length));
+
+    if (!hasRss && !hasNewsApi && selectedCustomUrls.length === 0) {
+      showToast("Vui lòng chọn ít nhất 1 nguồn tin", "error");
+      list.innerHTML = '<div style="color:var(--color-text-tertiary);font-size:13px;padding:1rem 0;text-align:center">Chưa có nguồn được chọn để tải bài</div>';
+      return;
+    }
+
+    const articles = await apiFetch("/api/articles", {
+      method: "POST",
+      body: JSON.stringify({
+        fetch_rss: hasRss,
+        fetch_newsapi: hasNewsApi,
+        custom_news_urls: selectedCustomUrls,
+      }),
+    });
     state.articles = Array.isArray(articles) ? articles : [];
     state.selectedArticle = null;
     renderArticles();
@@ -999,7 +1125,12 @@ async function loadStats() {
 async function saveConfig() {
   const pageId = document.getElementById("page-id-input").value.trim();
   const token = document.getElementById("token-input").value.trim();
-  const claudeKey = document.getElementById("claude-key-input").value.trim();
+  const geminiKey = document.getElementById("gemini-key-input").value.trim();
+  const customNewsUrlsRaw = document.getElementById("custom-news-urls-input").value || "";
+  const customNewsUrls = customNewsUrlsRaw
+    .split(/\r?\n|,/)
+    .map((x) => x.trim())
+    .filter(Boolean);
 
   try {
     const data = await apiFetch("/api/config/save", {
@@ -1007,7 +1138,8 @@ async function saveConfig() {
       body: JSON.stringify({
         page_id: pageId,
         access_token: token,
-        claude_api_key: claudeKey,
+        gemini_api_key: geminiKey,
+        custom_news_urls: customNewsUrls,
       }),
     });
 
@@ -1021,19 +1153,25 @@ async function saveConfig() {
 async function loadConfigStatus() {
   try {
     const data = await apiFetch("/api/config/status");
+    state.sourceConfig = data;
 
     const fbOk = Boolean(data.facebook?.ok);
-    const claudeOk = Boolean(data.claude?.ok);
-    const overallOk = fbOk && claudeOk;
+    const geminiOk = Boolean(data.gemini?.ok);
+    const overallOk = fbOk && geminiOk;
 
     const statusText = overallOk
-      ? "Facebook + Claude đã sẵn sàng"
-      : `Kết nối: FB ${fbOk ? "OK" : "Lỗi"} · Claude ${claudeOk ? "OK" : "Lỗi"}`;
+      ? "Facebook + Gemini đã sẵn sàng"
+      : `Kết nối: FB ${fbOk ? "OK" : "Lỗi"} · Gemini ${geminiOk ? "OK" : "Lỗi"}`;
 
     setHeaderStatus(overallOk, statusText);
     document.getElementById("post-now-btn").disabled = !(data.has_page_id && data.has_access_token);
+    document.getElementById("custom-news-urls-input").value = Array.isArray(data.custom_news_urls)
+      ? data.custom_news_urls.join("\n")
+      : "";
+    renderSourceList();
   } catch (error) {
     setHeaderStatus(false, "Không thể kiểm tra trạng thái kết nối");
+    renderSourceList();
     showToast(`Status API lỗi: ${error.message}`, "error");
   }
 }
@@ -1050,4 +1188,5 @@ async function initDashboard() {
 
 initDashboard();
 </script>
+
 

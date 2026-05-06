@@ -12,8 +12,16 @@ from typing import Any, Dict, Iterable, List, Optional
 import feedparser
 import requests
 
-from .config import NEWS_API_KEY, NEWS_KEYWORD, NEWS_LANGUAGE, NEWS_PAGE_SIZE, RSS_URLS
+from .config import (
+    CUSTOM_NEWS_URLS,
+    NEWS_API_KEY,
+    NEWS_KEYWORD,
+    NEWS_LANGUAGE,
+    NEWS_PAGE_SIZE,
+    RSS_URLS,
+)
 from .database import Database
+from .source_collector import collect_article_urls, resolve_source_lists
 
 logger = logging.getLogger(__name__)
 
@@ -192,21 +200,28 @@ class Crawler:
         self.settings = settings
 
     def collect(self) -> List[Dict[str, Any]]:
-        """Collect from RSS + NewsAPI and persist new articles into DB."""
+        """Collect from RSS + NewsAPI + configured article URLs and persist new articles into DB."""
         db = Database()
         try:
             urls = RSS_URLS
+            custom_news_urls = CUSTOM_NEWS_URLS
             keyword = NEWS_KEYWORD
             api_key = NEWS_API_KEY
 
             if self.settings is not None:
                 urls = getattr(self.settings, "rss_urls", urls)
+                custom_news_urls = getattr(self.settings, "custom_news_urls", custom_news_urls)
                 keyword = getattr(self.settings, "news_keyword", keyword)
                 api_key = getattr(self.settings, "news_api_key", api_key)
 
             rss_items = fetch_rss(urls=urls, db=db)
             news_items = fetch_newsapi(keyword=keyword, api_key=api_key, db=db)
-            all_items = rss_items + news_items
+            _, article_urls = resolve_source_lists(
+                youtube_urls=[],
+                article_urls=list(custom_news_urls or []),
+            )
+            custom_url_items = collect_article_urls(article_urls, db=db)
+            all_items = rss_items + news_items + custom_url_items
 
             saved: List[Dict[str, Any]] = []
             for article in all_items:
@@ -217,9 +232,10 @@ class Crawler:
                     saved.append(enriched)
 
             logger.info(
-                "Crawler collected rss=%s newsapi=%s saved=%s",
+                "Crawler collected rss=%s newsapi=%s custom_urls=%s saved=%s",
                 len(rss_items),
                 len(news_items),
+                len(custom_url_items),
                 len(saved),
             )
             return saved

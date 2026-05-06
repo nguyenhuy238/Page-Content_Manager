@@ -98,6 +98,35 @@ def get_post_insights(post_id: str, token: str) -> Dict[str, int]:
         return {"reach": 0, "engagement": 0}
 
 
+def comment_on_post(post_id: str, token: str, message: str) -> Dict[str, Any]:
+    """Create a comment on a Facebook post."""
+    if not post_id or not token:
+        return {"ok": False, "error": "Missing post_id or access token"}
+    if not message.strip():
+        return {"ok": False, "error": "Comment message is empty"}
+
+    endpoint = f"{GRAPH_BASE_URL}/{post_id}/comments"
+    payload = {
+        "message": message.strip(),
+        "access_token": token,
+    }
+
+    try:
+        response = requests.post(endpoint, data=payload, timeout=25)
+        data = response.json() if response.content else {}
+        if response.status_code >= 400:
+            return {
+                "ok": False,
+                "status_code": response.status_code,
+                "error": data.get("error", {}).get("message", "Facebook comment API error"),
+                "response": data,
+            }
+        return {"ok": True, "comment_id": data.get("id"), "response": data}
+    except Exception as exc:
+        logger.exception("comment_on_post failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
 class FacebookPoster:
     """Compatibility wrapper for old class-based usage."""
 
