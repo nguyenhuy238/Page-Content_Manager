@@ -330,7 +330,7 @@
           <div class="tone-row">
             <button class="tone-chip active" onclick="setTone(this,'hài hước')">Hài hước</button>
             <button class="tone-chip" onclick="setTone(this,'chuyên nghiệp')">Chuyên nghiệp</button>
-            <button class="tone-chip" onclick="setTone(this,'giật tít')">Giật tít</button>
+            <button class="tone-chip" onclick="setTone(this,'giật title')">Giật tít</button>
             <button class="tone-chip" onclick="setTone(this,'chia sẻ cá nhân')">Cá nhân</button>
           </div>
           <div class="label" style="margin-top:10px">Niche page</div>
@@ -584,10 +584,10 @@
         <div class="card">
           <div class="card-title">Nguồn bài viết thủ công</div>
           <div>
-            <div class="label">Danh sách URL nguồn tin (mỗi dòng 1 link)</div>
-            <textarea id="custom-news-urls-input" class="prompt-textarea" style="min-height:140px" placeholder="https://example.com/article-1&#10;https://example.com/article-2"></textarea>
+            <div class="label">Danh sách URL nguồn tin hoặc domain (mỗi dòng 1 link)</div>
+            <textarea id="custom-news-urls-input" class="prompt-textarea" style="min-height:140px" placeholder="https://example.com/article-1&#10;https://www.rollingstone.com/&#10;https://www.hola.com/"></textarea>
             <div style="font-size:12px;color:var(--color-text-secondary);margin-top:8px">
-              Nếu để trống, hệ thống sẽ không thu thập từ URL thủ công.
+              Có thể nhập link bài viết hoặc link domain/chuyên mục. Với domain, hệ thống sẽ tự dò các link bài phù hợp trong cùng domain để thu thập.
             </div>
           </div>
         </div>

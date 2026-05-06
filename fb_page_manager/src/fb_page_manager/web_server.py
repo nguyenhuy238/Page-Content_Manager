@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
 import google.generativeai as genai
@@ -219,6 +220,28 @@ def _to_str_list(value: Any) -> List[str]:
     return []
 
 
+def _normalize_http_url(raw_url: str) -> str:
+    value = str(raw_url or "").strip()
+    if not value:
+        return ""
+    if value.startswith(("http://", "https://")):
+        return value
+    return f"https://{value}"
+
+
+def _extract_domains(urls: List[str]) -> List[str]:
+    domains: List[str] = []
+    seen: set[str] = set()
+    for raw in urls:
+        normalized = _normalize_http_url(raw)
+        parsed = urlparse(normalized)
+        domain = (parsed.netloc or "").lower().strip()
+        if domain and domain not in seen:
+            seen.add(domain)
+            domains.append(domain)
+    return domains
+
+
 def _get_article_id_by_url(db: Database, url: str) -> Optional[int]:
     row = db.conn.execute(
         "SELECT id FROM articles WHERE url = ? LIMIT 1",
@@ -312,15 +335,50 @@ def create_app() -> Flask:
                     )
 
             data = fetched_now
+            if not data:
+                fallback_limit = max(1, min(int(payload.get("fallback_limit") or 20), 100))
+                where_parts: List[str] = []
+                where_params: List[Any] = []
+
+                if fetch_rss_enabled:
+                    where_parts.append("source LIKE ?")
+                    where_params.append("rss:%")
+                if fetch_newsapi_enabled:
+                    where_parts.append("source LIKE ?")
+                    where_params.append("newsapi:%")
+                if _to_bool(payload.get("fetch_youtube"), default=True):
+                    where_parts.append("source LIKE ?")
+                    where_params.append("youtube:%")
+                if article_urls:
+                    selected_domains = _extract_domains(article_urls)
+                    if selected_domains:
+                        domain_filters = " OR ".join(["source = ?"] * len(selected_domains))
+                        where_parts.append(f"({domain_filters})")
+                        where_params.extend([f"news:{d}" for d in selected_domains])
+                    url_filters = " OR ".join(["url = ?"] * len(article_urls))
+                    where_parts.append(f"({url_filters})")
+                    where_params.extend(article_urls)
+
+                if where_parts:
+                    query = f"""
+                        SELECT id, title, url, source, summary, fetched_at, used
+                        FROM articles
+                        WHERE {" OR ".join(where_parts)}
+                        ORDER BY fetched_at DESC
+                        LIMIT ?
+                    """
+                    rows = db.conn.execute(query, (*where_params, fallback_limit)).fetchall()
+                    data = [_serialize_article(dict(row)) for row in rows]
 
             logger.info(
-                "Articles fetched: rss=%s newsapi=%s youtube=%s custom_urls=%s inserted=%s returned_now=%s",
+                "Articles fetched: rss=%s newsapi=%s youtube=%s custom_urls=%s inserted=%s returned_now=%s fallback=%s",
                 len(rss_items),
                 len(news_items),
                 len(youtube_items),
                 len(custom_url_items),
                 inserted,
                 len(data),
+                0 if fetched_now else len(data),
             )
             return _success(data)
         except Exception as exc:

@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import feedparser
 import requests
@@ -73,6 +73,73 @@ def _summary_from_text(text: str, max_words: int = 80) -> str:
     if len(words) <= max_words:
         return text
     return " ".join(words[:max_words]).strip() + "..."
+
+
+def _normalize_http_url(raw_url: str) -> str:
+    value = str(raw_url or "").strip()
+    if not value:
+        return ""
+    if value.startswith(("http://", "https://")):
+        return value
+    return f"https://{value}"
+
+
+def _is_probable_domain_seed(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    path = (parsed.path or "").strip()
+    if path in {"", "/"}:
+        return True
+    lowered = path.lower()
+    if lowered.endswith((".xml", ".rss", ".atom", ".json")):
+        return False
+    # Category/section pages can also be used as seeds.
+    segments = [p for p in path.split("/") if p]
+    return len(segments) <= 2
+
+
+def _looks_like_article_path(path: str) -> bool:
+    lowered = (path or "").lower()
+    if not lowered or lowered in {"/", ""}:
+        return False
+    if lowered.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf", ".mp4")):
+        return False
+    if any(x in lowered for x in ["/tag/", "/author/", "/category/", "/search", "/video/", "/videos/"]):
+        return False
+    if re.search(r"/\d{4}/\d{1,2}/", lowered):
+        return True
+    segments = [p for p in lowered.split("/") if p]
+    return len(segments) >= 2 and any("-" in seg for seg in segments)
+
+
+def _extract_candidate_article_links(page_url: str, page_html: str, limit: int = 15) -> List[str]:
+    parsed_seed = urlparse(page_url)
+    seed_host = (parsed_seed.netloc or "").lower()
+    soup = BeautifulSoup(page_html, "html.parser")
+    seen: set[str] = set()
+    links: List[str] = []
+
+    for a in soup.find_all("a", href=True):
+        href = str(a.get("href") or "").strip()
+        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+            continue
+        absolute = urljoin(page_url, href)
+        parsed = urlparse(absolute)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            continue
+        host = (parsed.netloc or "").lower()
+        if host != seed_host:
+            continue
+        clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
+        if clean in seen:
+            continue
+        seen.add(clean)
+        if _looks_like_article_path(parsed.path):
+            links.append(clean)
+            if len(links) >= limit:
+                break
+    return links
 
 
 def _resolve_channel_id(channel_url: str, session: requests.Session) -> str:
@@ -154,31 +221,56 @@ def collect_article_urls(urls: List[str], db: Optional[Database] = None) -> List
     output: List[Dict[str, Any]] = []
     try:
         for url in urls:
-            raw_url = str(url).strip()
+            raw_url = _normalize_http_url(url)
             if not raw_url:
                 continue
             try:
-                response = session.get(
-                    raw_url,
-                    timeout=25,
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
+                response = session.get(raw_url, timeout=25, headers={"User-Agent": "Mozilla/5.0"})
                 response.raise_for_status()
-                title, full_text = _extract_article_text(response.text)
-                if not title:
-                    title = raw_url
-                summary = _summary_from_text(full_text, max_words=100)
-                output.append(
-                    {
-                        "title": title,
-                        "url": raw_url,
-                        "source": "news:url_list",
-                        "summary": summary,
-                        "content": full_text,
-                        "published_at": _utc_iso(),
-                        "content_type": "article",
-                    }
-                )
+                target_urls = [raw_url]
+                if _is_probable_domain_seed(raw_url):
+                    discovered = _extract_candidate_article_links(
+                        page_url=raw_url,
+                        page_html=response.text,
+                        limit=15,
+                    )
+                    if discovered:
+                        target_urls = discovered
+                        logger.info(
+                            "Discovered %s article links from seed domain %s",
+                            len(discovered),
+                            raw_url,
+                        )
+
+                for article_url in target_urls:
+                    try:
+                        article_res = (
+                            response if article_url == raw_url and target_urls == [raw_url]
+                            else session.get(
+                                article_url,
+                                timeout=25,
+                                headers={"User-Agent": "Mozilla/5.0"},
+                            )
+                        )
+                        article_res.raise_for_status()
+                        title, full_text = _extract_article_text(article_res.text)
+                        if not title:
+                            title = article_url
+                        summary = _summary_from_text(full_text, max_words=100)
+                        domain = (urlparse(article_url).netloc or "url_list").lower()
+                        output.append(
+                            {
+                                "title": title,
+                                "url": article_url,
+                                "source": f"news:{domain}",
+                                "summary": summary,
+                                "content": full_text,
+                                "published_at": _utc_iso(),
+                                "content_type": "article",
+                            }
+                        )
+                    except Exception as article_exc:
+                        logger.warning("Failed to collect article %s: %s", article_url, article_exc)
             except Exception as exc:
                 logger.warning("Failed to collect article %s: %s", raw_url, exc)
         return _filter_new_items(output, local_db)
