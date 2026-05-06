@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 import google.generativeai as genai
 
-from .config import GEMINI_API_KEY, GEMINI_MODEL
+from . import config as app_config
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,53 @@ Yêu cầu output:
 - Không dùng markdown
 - Có dòng "Nguồn: {source}" ở cuối
 """
+
+_MODEL_FALLBACKS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+]
+
+
+def _pick_model(preferred: Optional[str] = None) -> str:
+    """Resolve a usable Gemini model name for generate_content."""
+    ordered: list[str] = []
+    if preferred and preferred.strip():
+        ordered.append(preferred.strip())
+
+    cfg_model = str(getattr(app_config, "GEMINI_MODEL", "") or "").strip()
+    if cfg_model:
+        ordered.append(cfg_model)
+
+    for fallback in _MODEL_FALLBACKS:
+        if fallback not in ordered:
+            ordered.append(fallback)
+
+    api_key = str(getattr(app_config, "GEMINI_API_KEY", "") or "").strip()
+    if not api_key:
+        return ordered[0]
+
+    try:
+        genai.configure(api_key=api_key)
+        models = list(genai.list_models())
+        available = []
+        for item in models:
+            methods = [str(m) for m in getattr(item, "supported_generation_methods", [])]
+            if "generateContent" not in methods:
+                continue
+            name = str(getattr(item, "name", "") or "").strip()
+            if not name:
+                continue
+            if name.startswith("models/"):
+                name = name.split("/", 1)[1]
+            available.append(name)
+        for candidate in ordered:
+            if candidate in available:
+                return candidate
+    except Exception as exc:
+        logger.warning("Cannot resolve Gemini model list, fallback to configured model: %s", exc)
+
+    return ordered[0]
 
 
 def generate_caption(
@@ -60,7 +107,8 @@ def generate_caption(
     if not title:
         return ""
 
-    if not GEMINI_API_KEY:
+    api_key = str(getattr(app_config, "GEMINI_API_KEY", "") or "").strip()
+    if not api_key:
         logger.warning("GEMINI_API_KEY is missing. Returning fallback caption.")
         return f"{title}\n\n{summary}\n\nNguồn: {source}\n{url}".strip()
 
@@ -75,8 +123,9 @@ def generate_caption(
     )
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        gm = genai.GenerativeModel(model_name=model or GEMINI_MODEL)
+        genai.configure(api_key=api_key)
+        selected_model = _pick_model(model)
+        gm = genai.GenerativeModel(model_name=selected_model)
         response = gm.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
@@ -170,7 +219,8 @@ def generate_campaign_package(
     if not title:
         return {}
 
-    if not GEMINI_API_KEY:
+    api_key = str(getattr(app_config, "GEMINI_API_KEY", "") or "").strip()
+    if not api_key:
         logger.warning("GEMINI_API_KEY missing. Returning fallback campaign package.")
         short_summary = summary or (content[:480] + "..." if len(content) > 480 else content)
         return {
@@ -222,8 +272,9 @@ Devuelve SOLO JSON valido con estas claves exactas:
 """
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        gm = genai.GenerativeModel(model_name=model or GEMINI_MODEL)
+        genai.configure(api_key=api_key)
+        selected_model = _pick_model(model)
+        gm = genai.GenerativeModel(model_name=selected_model)
         response = gm.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(

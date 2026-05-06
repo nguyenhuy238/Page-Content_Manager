@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -64,7 +65,58 @@ def _extract_article_text(page_html: str) -> Tuple[str, str]:
     root = soup.find("article") or soup.find("main") or soup.body or soup
     paragraphs = [_clean_text(p.get_text(" ", strip=True)) for p in root.find_all("p")]
     paragraphs = [p for p in paragraphs if len(p) >= 40]
+    if not paragraphs:
+        for selector in ["div[itemprop='articleBody']", ".article-body", ".entry-content", ".post-content"]:
+            block = soup.select_one(selector)
+            if not block:
+                continue
+            alt = [_clean_text(p.get_text(" ", strip=True)) for p in block.find_all("p")]
+            alt = [p for p in alt if len(p) >= 40]
+            if alt:
+                paragraphs = alt
+                break
     text = "\n\n".join(paragraphs[:60]).strip()
+    if text:
+        return title, text
+
+    # Fallback 1: structured data (JSON-LD).
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = (script.string or script.get_text() or "").strip()
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+
+        nodes: List[Dict[str, Any]] = []
+        if isinstance(data, dict):
+            if isinstance(data.get("@graph"), list):
+                nodes.extend([x for x in data.get("@graph", []) if isinstance(x, dict)])
+            nodes.append(data)
+        elif isinstance(data, list):
+            nodes.extend([x for x in data if isinstance(x, dict)])
+
+        for node in nodes:
+            article_body = _clean_text(str(node.get("articleBody") or ""))
+            description = _clean_text(str(node.get("description") or ""))
+            text_candidate = article_body or description
+            if len(text_candidate) >= 120:
+                return title, text_candidate
+
+    # Fallback 2: OpenGraph / meta description.
+    og_desc = soup.find("meta", attrs={"property": "og:description"})
+    if og_desc and og_desc.get("content"):
+        meta_text = _clean_text(str(og_desc.get("content") or ""))
+        if len(meta_text) >= 80:
+            return title, meta_text
+
+    meta_desc = soup.find("meta", attrs={"name": "description"})
+    if meta_desc and meta_desc.get("content"):
+        meta_text = _clean_text(str(meta_desc.get("content") or ""))
+        if len(meta_text) >= 80:
+            return title, meta_text
+
     return title, text
 
 
@@ -107,6 +159,21 @@ def _looks_like_article_path(path: str) -> bool:
         return False
     if any(x in lowered for x in ["/tag/", "/author/", "/category/", "/search", "/video/", "/videos/"]):
         return False
+    if any(
+        x in lowered
+        for x in [
+            "/about",
+            "/contact",
+            "/privacy",
+            "/politica-cookies",
+            "/newsletter",
+            "/suscripcion",
+            "/shopping",
+            "/beauty-addict",
+            "/horoscopo",
+        ]
+    ):
+        return False
     if re.search(r"/\d{4}/\d{1,2}/", lowered):
         return True
     segments = [p for p in lowered.split("/") if p]
@@ -140,6 +207,37 @@ def _extract_candidate_article_links(page_url: str, page_html: str, limit: int =
             if len(links) >= limit:
                 break
     return links
+
+
+def _is_probable_article_html(page_html: str, url: str, text: str) -> bool:
+    clean_len = len(_clean_text(text))
+    if clean_len < 60:
+        return False
+
+    soup = BeautifulSoup(page_html, "html.parser")
+    parsed = urlparse(url)
+    host = (parsed.netloc or "").lower()
+    path = parsed.path or ""
+
+    # HOLA article URLs usually contain a long numeric slug segment.
+    if "hola.com" in host and re.search(r"/\d{8,}/", path):
+        return True
+
+    og_type = soup.find("meta", attrs={"property": "og:type"})
+    og_value = str(og_type.get("content") or "").lower() if og_type else ""
+    if "article" in og_value:
+        return True
+
+    if soup.find("article") is not None:
+        return True
+
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = script.string or script.get_text() or ""
+        lowered = raw.lower()
+        if any(kind in lowered for kind in ['"@type":"newsarticle"', '"@type":"article"', '"@type":"blogposting"']):
+            return True
+
+    return _looks_like_article_path(parsed.path)
 
 
 def _resolve_channel_id(channel_url: str, session: requests.Session) -> str:
@@ -193,7 +291,12 @@ def _fetch_transcript(video_id: str, languages: List[str]) -> str:
         return ""
 
 
-def _filter_new_items(items: Iterable[Dict[str, Any]], db: Database) -> List[Dict[str, Any]]:
+def _filter_new_items(
+    items: Iterable[Dict[str, Any]],
+    db: Database,
+    *,
+    skip_db_duplicates: bool = True,
+) -> List[Dict[str, Any]]:
     clean: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for item in items:
@@ -204,11 +307,12 @@ def _filter_new_items(items: Iterable[Dict[str, Any]], db: Database) -> List[Dic
         if url in seen:
             continue
         seen.add(url)
-        try:
-            if db.is_duplicate(url):
-                continue
-        except Exception:
-            pass
+        if skip_db_duplicates:
+            try:
+                if db.is_duplicate(url):
+                    continue
+            except Exception:
+                pass
         clean.append(item)
     return clean
 
@@ -256,7 +360,10 @@ def collect_article_urls(urls: List[str], db: Optional[Database] = None) -> List
                         title, full_text = _extract_article_text(article_res.text)
                         if not title:
                             title = article_url
-                        summary = _summary_from_text(full_text, max_words=100)
+                        if not _is_probable_article_html(article_res.text, article_url, full_text):
+                            logger.info("Skip non-article or thin content url=%s", article_url)
+                            continue
+                        summary = _summary_from_text(full_text, max_words=220)
                         domain = (urlparse(article_url).netloc or "url_list").lower()
                         output.append(
                             {
@@ -273,7 +380,8 @@ def collect_article_urls(urls: List[str], db: Optional[Database] = None) -> List
                         logger.warning("Failed to collect article %s: %s", article_url, article_exc)
             except Exception as exc:
                 logger.warning("Failed to collect article %s: %s", raw_url, exc)
-        return _filter_new_items(output, local_db)
+        # Keep duplicate URLs so caller can refresh empty summaries for existing rows.
+        return _filter_new_items(output, local_db, skip_db_duplicates=False)
     finally:
         session.close()
         if close_when_done:
@@ -333,7 +441,7 @@ def collect_youtube_channels(
             except Exception as exc:
                 logger.warning("Failed to collect YouTube channel %s: %s", raw_channel_url, exc)
 
-        return _filter_new_items(output, local_db)
+        return _filter_new_items(output, local_db, skip_db_duplicates=True)
     finally:
         session.close()
         if close_when_done:

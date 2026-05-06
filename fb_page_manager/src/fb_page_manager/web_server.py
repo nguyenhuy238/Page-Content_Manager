@@ -252,6 +252,56 @@ def _get_article_id_by_url(db: Database, url: str) -> Optional[int]:
     return int(row["id"])
 
 
+def _refresh_article_summary_if_empty(
+    db: Database,
+    *,
+    url: str,
+    title: str,
+    source: str,
+    summary: str,
+) -> Optional[int]:
+    clean_url = str(url or "").strip()
+    clean_summary = str(summary or "").strip()
+    if not clean_url or not clean_summary:
+        return None
+
+    row = db.conn.execute(
+        """
+        SELECT id, COALESCE(summary, '') AS summary
+        FROM articles
+        WHERE url = ?
+        LIMIT 1
+        """,
+        (clean_url,),
+    ).fetchone()
+    if row is None:
+        return None
+
+    existing_summary = str(row["summary"] or "").strip()
+    if existing_summary:
+        return int(row["id"])
+
+    with db.conn:
+        db.conn.execute(
+            """
+            UPDATE articles
+            SET title = COALESCE(NULLIF(?, ''), title),
+                source = COALESCE(NULLIF(?, ''), source),
+                summary = ?,
+                fetched_at = ?
+            WHERE id = ?
+            """,
+            (
+                str(title or "").strip(),
+                str(source or "").strip(),
+                clean_summary,
+                datetime.now().isoformat(),
+                int(row["id"]),
+            ),
+        )
+    return int(row["id"])
+
+
 def create_app() -> Flask:
     app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
 
@@ -312,6 +362,7 @@ def create_app() -> Flask:
             custom_url_items = collect_article_urls(article_urls, db=db) if article_urls else []
 
             inserted = 0
+            refreshed = 0
             fetched_now: List[Dict[str, Any]] = []
             for article in rss_items + news_items + youtube_items + custom_url_items:
                 article_id = db.save_article(article)
@@ -330,6 +381,29 @@ def create_app() -> Flask:
                             "created_at": str(
                                 article.get("published_at") or datetime.now().isoformat()
                             ),
+                            "used": False,
+                        }
+                    )
+                    continue
+
+                refreshed_id = _refresh_article_summary_if_empty(
+                    db,
+                    url=str(article.get("url") or ""),
+                    title=str(article.get("title") or ""),
+                    source=str(article.get("source") or "unknown"),
+                    summary=str(article.get("summary") or ""),
+                )
+                if refreshed_id is not None:
+                    refreshed += 1
+                    fetched_now.append(
+                        {
+                            "id": refreshed_id,
+                            "title": str(article.get("title") or ""),
+                            "url": str(article.get("url") or ""),
+                            "source": str(article.get("source") or "unknown"),
+                            "summary": str(article.get("summary") or ""),
+                            "published_at": datetime.now().isoformat(),
+                            "created_at": datetime.now().isoformat(),
                             "used": False,
                         }
                     )
@@ -360,23 +434,34 @@ def create_app() -> Flask:
                     where_params.extend(article_urls)
 
                 if where_parts:
-                    query = f"""
+                    query_with_summary = f"""
                         SELECT id, title, url, source, summary, fetched_at, used
                         FROM articles
-                        WHERE {" OR ".join(where_parts)}
+                        WHERE ({" OR ".join(where_parts)})
+                          AND TRIM(COALESCE(summary, '')) != ''
                         ORDER BY fetched_at DESC
                         LIMIT ?
                     """
-                    rows = db.conn.execute(query, (*where_params, fallback_limit)).fetchall()
+                    rows = db.conn.execute(query_with_summary, (*where_params, fallback_limit)).fetchall()
+                    if not rows:
+                        query_any = f"""
+                            SELECT id, title, url, source, summary, fetched_at, used
+                            FROM articles
+                            WHERE ({" OR ".join(where_parts)})
+                            ORDER BY fetched_at DESC
+                            LIMIT ?
+                        """
+                        rows = db.conn.execute(query_any, (*where_params, fallback_limit)).fetchall()
                     data = [_serialize_article(dict(row)) for row in rows]
 
             logger.info(
-                "Articles fetched: rss=%s newsapi=%s youtube=%s custom_urls=%s inserted=%s returned_now=%s fallback=%s",
+                "Articles fetched: rss=%s newsapi=%s youtube=%s custom_urls=%s inserted=%s refreshed=%s returned_now=%s fallback=%s",
                 len(rss_items),
                 len(news_items),
                 len(youtube_items),
                 len(custom_url_items),
                 inserted,
+                refreshed,
                 len(data),
                 0 if fetched_now else len(data),
             )
