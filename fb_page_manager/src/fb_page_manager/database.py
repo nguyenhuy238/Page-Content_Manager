@@ -85,9 +85,109 @@ class Database:
                     )
                     """
                 )
+                self._migrate_posts_table_if_needed()
         except Exception as exc:
             logger.exception("Failed to initialize database schema: %s", exc)
             raise
+
+    def _migrate_posts_table_if_needed(self) -> None:
+        """Migrate legacy `posts` table schema to the current queue/post schema."""
+        columns = {
+            str(row["name"])
+            for row in self.conn.execute("PRAGMA table_info(posts)").fetchall()
+        }
+        if not columns:
+            return
+
+        required_columns = {
+            "article_id",
+            "caption",
+            "scheduled_time",
+            "posted_at",
+            "reach",
+            "engagement",
+        }
+        if required_columns.issubset(columns):
+            return
+
+        # Legacy schema marker from older versions:
+        # posts(source, title, source_url, rewritten_caption, scheduled_for, ...)
+        legacy_columns = {"source_url", "rewritten_caption", "scheduled_for"}
+        if not legacy_columns.issubset(columns):
+            logger.warning("Unknown posts schema detected, skipping migration. columns=%s", columns)
+            return
+
+        logger.info("Detected legacy posts schema, starting migration to current schema")
+        self.conn.execute("ALTER TABLE posts RENAME TO posts_legacy")
+        self.conn.execute(
+            """
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id INTEGER,
+                caption TEXT NOT NULL,
+                scheduled_time TEXT,
+                posted_at TEXT,
+                status TEXT NOT NULL DEFAULT 'queued',
+                reach INTEGER NOT NULL DEFAULT 0,
+                engagement INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(article_id) REFERENCES articles(id)
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO posts (
+                id,
+                article_id,
+                caption,
+                scheduled_time,
+                posted_at,
+                status,
+                reach,
+                engagement
+            )
+            SELECT
+                p.id,
+                (
+                    SELECT a.id
+                    FROM articles a
+                    WHERE a.url = p.source_url
+                    LIMIT 1
+                ) AS article_id,
+                COALESCE(
+                    NULLIF(TRIM(p.rewritten_caption), ''),
+                    NULLIF(TRIM(p.original_caption), ''),
+                    ''
+                ) AS caption,
+                p.scheduled_for AS scheduled_time,
+                CASE
+                    WHEN p.status = 'posted' THEN COALESCE(p.updated_at, p.created_at)
+                    ELSE NULL
+                END AS posted_at,
+                CASE
+                    WHEN p.status IN ('posted', 'failed', 'queued') THEN p.status
+                    WHEN p.status IN ('scheduled', 'crawled', 'generated') THEN 'queued'
+                    ELSE 'queued'
+                END AS status,
+                0 AS reach,
+                0 AS engagement
+            FROM posts_legacy p
+            WHERE COALESCE(
+                NULLIF(TRIM(p.rewritten_caption), ''),
+                NULLIF(TRIM(p.original_caption), ''),
+                ''
+            ) != ''
+            """
+        )
+        self.conn.execute("DROP TABLE posts_legacy")
+        self.conn.execute(
+            """
+            UPDATE sqlite_sequence
+            SET seq = COALESCE((SELECT MAX(id) FROM posts), 0)
+            WHERE name = 'posts'
+            """
+        )
+        logger.info("Legacy posts migration completed")
 
     def save_article(self, article: Dict[str, Any]) -> Optional[int]:
         """Save article if URL is not duplicate. Returns article id or None."""
