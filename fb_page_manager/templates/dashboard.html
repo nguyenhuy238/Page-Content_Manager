@@ -197,6 +197,47 @@
     background: var(--color-background-secondary); color: var(--color-text-primary);
     font-family: var(--font-sans); cursor: pointer;
   }
+  #tab-setup .card { padding: 1rem 1rem 0.95rem; }
+  #tab-setup .label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 6px;
+  }
+  #tab-setup select {
+    min-height: 38px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  }
+  #tab-setup select:hover { border-color: #94a3b8; background: #f1f5f9; }
+  #tab-setup select:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    background: #ffffff;
+  }
+  #tab-setup select[multiple] {
+    min-height: 112px;
+    padding: 6px;
+    background: #f8fafc;
+  }
+  #tab-setup select[multiple] option {
+    padding: 6px 8px;
+    border-radius: 6px;
+    margin-bottom: 2px;
+  }
+  #tab-setup select[multiple] option:checked {
+    background: linear-gradient(#dbeafe, #dbeafe);
+    color: #1e3a8a;
+    font-weight: 600;
+  }
+  .field-help {
+    margin-top: 5px;
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.4;
+  }
 
   .queue-status.fail { background: var(--color-background-danger); color: var(--color-text-danger); }
 
@@ -462,7 +503,14 @@
           <div style="display:flex;flex-direction:column;gap:10px">
             <div>
               <div class="label">Page ID</div>
-              <input type="text" placeholder="VD: 123456789012345" id="page-id-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+              <select id="page-id-input">
+                <option value="">Chọn Page ID...</option>
+              </select>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:8px;">
+                <div id="page-id-hint" style="font-size:12px;color:var(--color-text-secondary)">Nhập token rồi bấm tải danh sách Page.</div>
+                <button type="button" class="source-action-btn" onclick="refreshFacebookPages()">Tải Page</button>
+              </div>
+              <div class="field-help">Nên chọn từ danh sách để tránh sai Page ID.</div>
             </div>
             <div>
               <div class="label">Page Access Token (Long-lived)</div>
@@ -487,15 +535,18 @@
             <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;">
               <div>
                 <div class="label">Từ khóa</div>
-                <input type="text" id="news-keyword-input" placeholder="technology" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+                <select id="news-keyword-input"></select>
+                <div class="field-help">Chủ đề chính dùng để kéo tin từ NewsAPI.</div>
               </div>
               <div>
                 <div class="label">Ngôn ngữ</div>
-                <input type="text" id="news-language-input" placeholder="en" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+                <select id="news-language-input"></select>
+                <div class="field-help">Mã ngôn ngữ theo chuẩn NewsAPI (ví dụ: `en`, `vi`).</div>
               </div>
               <div>
                 <div class="label">Số bài/lần</div>
-                <input type="number" id="news-page-size-input" min="1" max="100" value="10" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+                <select id="news-page-size-input"></select>
+                <div class="field-help">Giới hạn số bài lấy về mỗi lần crawl.</div>
               </div>
             </div>
           </div>
@@ -523,8 +574,9 @@
                 <input type="number" id="youtube-max-videos-input" min="1" max="10" value="2" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
               </div>
               <div>
-                <div class="label">Ngôn ngữ transcript (CSV)</div>
-                <input type="text" id="youtube-transcript-langs-input" placeholder="es,en" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+                <div class="label">Ngôn ngữ transcript (chọn nhiều)</div>
+                <select id="youtube-transcript-langs-input" multiple size="4"></select>
+                <div class="field-help">Giữ `Ctrl` (hoặc `Cmd`) để chọn nhiều ngôn ngữ.</div>
               </div>
             </div>
           </div>
@@ -570,7 +622,102 @@ const state = {
   stats: null,
   sourceConfig: null,
   sourceSelections: {},
+  configOptions: null,
 };
+
+function fillSelect(selectId, values, selectedValue = "", placeholder = "") {
+  const el = document.getElementById(selectId);
+  if (!el) return;
+  const selected = String(selectedValue || "").trim();
+  const uniqueValues = Array.from(new Set((values || []).map((x) => String(x).trim()).filter(Boolean)));
+
+  const options = [];
+  if (placeholder) {
+    options.push(`<option value="">${placeholder}</option>`);
+  }
+  uniqueValues.forEach((value) => {
+    const isSelected = selected && selected === value ? " selected" : "";
+    options.push(`<option value="${value.replace(/"/g, "&quot;")}"${isSelected}>${value}</option>`);
+  });
+
+  if (selected && !uniqueValues.includes(selected)) {
+    options.push(`<option value="${selected.replace(/"/g, "&quot;")}" selected>${selected} (đang dùng)</option>`);
+  }
+  el.innerHTML = options.join("");
+}
+
+function setSelectValueWithFallback(selectId, value) {
+  const el = document.getElementById(selectId);
+  if (!el) return;
+  const text = String(value || "").trim();
+  if (!text) {
+    el.value = "";
+    return;
+  }
+  const hasOption = Array.from(el.options).some((opt) => opt.value === text);
+  if (!hasOption) {
+    const opt = document.createElement("option");
+    opt.value = text;
+    opt.textContent = `${text} (đang dùng)`;
+    el.appendChild(opt);
+  }
+  el.value = text;
+}
+
+function fillFacebookPages(pages, selectedPageId = "") {
+  const el = document.getElementById("page-id-input");
+  if (!el) return;
+  const selected = String(selectedPageId || "").trim();
+  const rows = Array.isArray(pages) ? pages : [];
+  const options = ['<option value="">Chọn Page ID...</option>'];
+
+  rows.forEach((item) => {
+    const id = String(item?.id || "").trim();
+    const name = String(item?.name || "").trim();
+    if (!id) return;
+    const label = name ? `${name} (${id})` : id;
+    const isSelected = selected && selected === id ? " selected" : "";
+    options.push(`<option value="${id}"${isSelected}>${label}</option>`);
+  });
+
+  if (selected && !rows.some((item) => String(item?.id || "").trim() === selected)) {
+    options.push(`<option value="${selected}" selected>${selected} (đang dùng)</option>`);
+  }
+  el.innerHTML = options.join("");
+}
+
+async function loadConfigOptions(accessToken = "") {
+  const token = String(accessToken || "").trim();
+  const qs = token ? `?access_token=${encodeURIComponent(token)}` : "";
+  const data = await apiFetch(`/api/config/options${qs}`);
+  state.configOptions = data;
+
+  fillSelect("news-keyword-input", data.news_keywords || [], "", "Chọn từ khóa...");
+  fillSelect("news-language-input", data.news_languages || [], "en");
+  fillSelect("news-page-size-input", (data.news_page_sizes || []).map((x) => String(x)), "10");
+  fillSelect("youtube-transcript-langs-input", data.youtube_transcript_languages || []);
+  fillFacebookPages(data.facebook_pages || []);
+
+  const pageHint = document.getElementById("page-id-hint");
+  if (pageHint) {
+    if (Array.isArray(data.facebook_pages) && data.facebook_pages.length > 0) {
+      pageHint.textContent = `Đã tải ${data.facebook_pages.length} Page từ token.`;
+    } else {
+      pageHint.textContent = data.facebook_pages_error || "Chưa tải được danh sách Page từ token.";
+    }
+  }
+}
+
+async function refreshFacebookPages() {
+  try {
+    const token = document.getElementById("token-input").value.trim();
+    await loadConfigOptions(token);
+    const currentPageId = document.getElementById("page-id-input").value.trim();
+    showToast(currentPageId ? "Đã tải lại danh sách Page" : "Đã tải danh sách Page", "success");
+  } catch (error) {
+    showToast(`Không thể tải danh sách Page: ${error.message}`, "error");
+  }
+}
 
 function showToast(message, type = "info") {
   const wrap = document.getElementById("toast-wrap");
@@ -1192,9 +1339,10 @@ async function saveConfig() {
     .map((x) => x.trim())
     .filter(Boolean);
   const youtubeMaxVideos = Number(document.getElementById("youtube-max-videos-input").value || "2");
-  const youtubeTranscriptLangs = (document.getElementById("youtube-transcript-langs-input").value || "")
-    .split(/\r?\n|,/)
-    .map((x) => x.trim())
+  const youtubeTranscriptLangs = Array.from(
+    document.getElementById("youtube-transcript-langs-input").selectedOptions || []
+  )
+    .map((opt) => String(opt.value || "").trim())
     .filter(Boolean);
   const customNewsUrlsRaw = document.getElementById("custom-news-urls-input").value || "";
   const customNewsUrls = customNewsUrlsRaw
@@ -1243,9 +1391,10 @@ async function loadConfigStatus() {
 
     setHeaderStatus(overallOk, statusText);
     document.getElementById("post-now-btn").disabled = !(data.has_page_id && data.has_access_token);
-    document.getElementById("news-keyword-input").value = data.news_keyword || "";
-    document.getElementById("news-language-input").value = data.news_language || "";
-    document.getElementById("news-page-size-input").value = Number(data.news_page_size || 10);
+    fillFacebookPages(state.configOptions?.facebook_pages || [], data.page_id || "");
+    setSelectValueWithFallback("news-keyword-input", data.news_keyword || "");
+    setSelectValueWithFallback("news-language-input", data.news_language || "");
+    setSelectValueWithFallback("news-page-size-input", String(Number(data.news_page_size || 10)));
     document.getElementById("rss-urls-input").value = Array.isArray(data.rss_urls)
       ? data.rss_urls.join("\n")
       : "";
@@ -1253,9 +1402,11 @@ async function loadConfigStatus() {
       ? data.youtube_channel_urls.join("\n")
       : "";
     document.getElementById("youtube-max-videos-input").value = Number(data.youtube_max_videos_per_channel || 2);
-    document.getElementById("youtube-transcript-langs-input").value = Array.isArray(data.youtube_transcript_langs)
-      ? data.youtube_transcript_langs.join(",")
-      : "";
+    const transcriptSelect = document.getElementById("youtube-transcript-langs-input");
+    const transcriptValues = Array.isArray(data.youtube_transcript_langs) ? data.youtube_transcript_langs : [];
+    Array.from(transcriptSelect.options).forEach((opt) => {
+      opt.selected = transcriptValues.includes(opt.value);
+    });
     document.getElementById("custom-news-urls-input").value = Array.isArray(data.custom_news_urls)
       ? data.custom_news_urls.join("\n")
       : "";
@@ -1274,6 +1425,7 @@ function sendPrompt(message) {
 async function initDashboard() {
   resetSelectedArticleUI();
   renderArticles();
+  await loadConfigOptions();
   await Promise.all([loadConfigStatus(), loadQueue(), loadStats()]);
 }
 

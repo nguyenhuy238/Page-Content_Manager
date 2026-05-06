@@ -131,6 +131,38 @@ def _try_fb_status() -> Tuple[bool, str]:
         return False, f"Facebook API lỗi: {exc}"
 
 
+def _fetch_facebook_pages(access_token: str) -> Tuple[List[Dict[str, str]], Optional[str]]:
+    token = (access_token or "").strip()
+    if not token:
+        return [], "Thiếu ACCESS_TOKEN để tải danh sách Page"
+
+    url = f"https://graph.facebook.com/{GRAPH_VERSION}/me/accounts"
+    params = {
+        "fields": "id,name",
+        "access_token": token,
+        "limit": 200,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        payload = response.json()
+        items = payload.get("data") if isinstance(payload, dict) else []
+        pages: List[Dict[str, str]] = []
+        if isinstance(items, list):
+            for row in items:
+                if not isinstance(row, dict):
+                    continue
+                page_id = str(row.get("id") or "").strip()
+                page_name = str(row.get("name") or "").strip()
+                if page_id:
+                    pages.append({"id": page_id, "name": page_name or page_id})
+        return pages, None
+    except Exception as exc:
+        logger.exception("Cannot fetch facebook pages: %s", exc)
+        return [], f"Không thể tải danh sách Page: {exc}"
+
+
 def _try_gemini_status() -> Tuple[bool, str]:
     settings = get_settings()
     if not settings.gemini_api_key:
@@ -837,6 +869,7 @@ def create_app() -> Flask:
 
         return _success(
             {
+                "page_id": settings.page_id,
                 "has_page_id": bool(settings.page_id),
                 "has_access_token": bool(settings.access_token),
                 "has_gemini_key": bool(settings.gemini_api_key),
@@ -860,6 +893,60 @@ def create_app() -> Flask:
                 },
                 "facebook": {"ok": fb_ok, "message": fb_message},
                 "gemini": {"ok": gemini_ok, "message": gemini_message},
+            }
+        )
+
+    @app.get("/api/config/options")
+    def api_config_options():
+        settings = get_settings()
+        token = str(request.args.get("access_token") or settings.access_token or "").strip()
+        pages, pages_error = _fetch_facebook_pages(token)
+
+        return _success(
+            {
+                "facebook_pages": pages,
+                "facebook_pages_error": pages_error,
+                "news_languages": [
+                    "ar",
+                    "de",
+                    "en",
+                    "es",
+                    "fr",
+                    "he",
+                    "it",
+                    "nl",
+                    "no",
+                    "pt",
+                    "ru",
+                    "sv",
+                    "ud",
+                    "zh",
+                ],
+                "news_keywords": [
+                    "technology",
+                    "artificial intelligence",
+                    "business",
+                    "finance",
+                    "startup",
+                    "science",
+                    "health",
+                    "sports",
+                    "entertainment",
+                    "world",
+                ],
+                "news_page_sizes": [5, 10, 20, 30, 50, 100],
+                "youtube_transcript_languages": [
+                    "vi",
+                    "en",
+                    "es",
+                    "fr",
+                    "de",
+                    "pt",
+                    "ja",
+                    "ko",
+                    "zh-Hans",
+                    "zh-Hant",
+                ],
             }
         )
 
