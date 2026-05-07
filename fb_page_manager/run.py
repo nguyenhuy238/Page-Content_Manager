@@ -74,6 +74,29 @@ def _test_gemini() -> Tuple[bool, str]:
         return False, f"Gemini API lỗi: {exc}"
 
 
+def _test_openai() -> Tuple[bool, str]:
+    settings = get_settings()
+    if not settings.openai_api_key:
+        return False, "OPENAI_API_KEY đang trống"
+
+    try:
+        resp = requests.get(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+            timeout=15,
+        )
+        data = resp.json() if resp.content else {}
+        if resp.status_code >= 400:
+            message = data.get("error", {}).get("message", f"HTTP {resp.status_code}")
+            return False, f"OpenAI API lỗi: {message}"
+        models = data.get("data") if isinstance(data, dict) else []
+        if not isinstance(models, list) or not models:
+            return False, "OpenAI API: danh sách model rỗng"
+        return True, "OpenAI API: OK"
+    except Exception as exc:
+        return False, f"OpenAI API lỗi: {exc}"
+
+
 def _test_facebook() -> Tuple[bool, str]:
     settings = get_settings()
     if not settings.page_id or not settings.access_token:
@@ -132,6 +155,7 @@ def run_test_connections() -> int:
     checks = [
         ("Facebook", _test_facebook),
         ("Gemini", _test_gemini),
+        ("OpenAI", _test_openai),
         ("Sources", _test_news_sources),
     ]
 

@@ -2,7 +2,7 @@
 
 Dashboard và scheduler tự động cho Facebook Page:
 - Thu thập bài từ RSS/NewsAPI
-- Tạo caption bằng Gemini
+- Tạo caption bằng AI (Gemini hoặc OpenAI)
 - Đưa vào hàng đợi và đăng theo lịch
 - Theo dõi thống kê trong SQLite
 - Pipeline campaign cho thị trường Mexico:
@@ -29,7 +29,9 @@ copy .env.example .env
 Mở `.env` và điền tối thiểu:
 - `PAGE_ID`
 - `ACCESS_TOKEN`
-- `GEMINI_API_KEY`
+- `GEMINI_API_KEY` (nếu dùng Gemini)
+- `OPENAI_API_KEY` (nếu dùng OpenAI text/image)
+- `AI_TEXT_PROVIDER` (`gemini` hoặc `openai`)
 - `RSS_URLS`
 - `POSTING_TIMES`
 
@@ -98,7 +100,7 @@ fb_page_manager/
     ├── campaign_pipeline.py # Pipeline campaign end-to-end
     ├── wordpress_publisher.py # Đăng bài qua WP REST API
     ├── image_generator.py # Sinh ảnh AI qua OpenAI Image API
-    ├── ai_writer.py       # Gemini caption generation
+    ├── ai_writer.py       # AI caption generation (Gemini/OpenAI)
     ├── fb_poster.py       # Facebook Graph API
     ├── scheduler.py       # Lịch đăng với thư viện schedule
     └── web_server.py      # Flask dashboard + REST API

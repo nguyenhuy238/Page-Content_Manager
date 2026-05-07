@@ -134,6 +134,8 @@ WP_DEFAULT_CATEGORY_ID: int = _parse_int(_first_env("WP_DEFAULT_CATEGORY_ID", de
 WP_DEFAULT_AUTHOR_ID: int = _parse_int(_first_env("WP_DEFAULT_AUTHOR_ID", default="0"), default=0)
 
 OPENAI_API_KEY: str = _first_env("OPENAI_API_KEY")
+AI_TEXT_PROVIDER: str = _first_env("AI_TEXT_PROVIDER", default="gemini").lower()
+OPENAI_TEXT_MODEL: str = _first_env("OPENAI_TEXT_MODEL", default="gpt-4o-mini")
 OPENAI_IMAGE_MODEL: str = _first_env("OPENAI_IMAGE_MODEL", default="gpt-image-1")
 OPENAI_IMAGE_SIZE: str = _first_env("OPENAI_IMAGE_SIZE", default="1024x1536")
 GENERATED_IMAGE_DIR: str = _first_env("GENERATED_IMAGE_DIR", default="data/generated_images")
@@ -175,6 +177,8 @@ class Settings:
     wp_default_category_id: int
     wp_default_author_id: int
     openai_api_key: str
+    ai_text_provider: str
+    openai_text_model: str
     openai_image_model: str
     openai_image_size: str
     generated_image_dir: str
@@ -216,6 +220,8 @@ def get_settings() -> Settings:
         wp_default_category_id=WP_DEFAULT_CATEGORY_ID,
         wp_default_author_id=WP_DEFAULT_AUTHOR_ID,
         openai_api_key=OPENAI_API_KEY,
+        ai_text_provider=AI_TEXT_PROVIDER,
+        openai_text_model=OPENAI_TEXT_MODEL,
         openai_image_model=OPENAI_IMAGE_MODEL,
         openai_image_size=OPENAI_IMAGE_SIZE,
         generated_image_dir=GENERATED_IMAGE_DIR,
@@ -234,7 +240,8 @@ def reload_config() -> None:
     global PIPELINE_AUTO_COMMENT_ON_FACEBOOK, FB_COMMENT_TEMPLATE
     global WP_BASE_URL, WP_USERNAME, WP_APP_PASSWORD, WP_POST_STATUS
     global WP_DEFAULT_CATEGORY_ID, WP_DEFAULT_AUTHOR_ID
-    global OPENAI_API_KEY, OPENAI_IMAGE_MODEL, OPENAI_IMAGE_SIZE, GENERATED_IMAGE_DIR
+    global OPENAI_API_KEY, AI_TEXT_PROVIDER, OPENAI_TEXT_MODEL
+    global OPENAI_IMAGE_MODEL, OPENAI_IMAGE_SIZE, GENERATED_IMAGE_DIR
 
     _load_env()
     PAGE_ID = _first_env("PAGE_ID", "FB_PAGE_ID")
@@ -290,6 +297,8 @@ def reload_config() -> None:
     WP_DEFAULT_AUTHOR_ID = _parse_int(_first_env("WP_DEFAULT_AUTHOR_ID", default="0"), default=0)
 
     OPENAI_API_KEY = _first_env("OPENAI_API_KEY")
+    AI_TEXT_PROVIDER = _first_env("AI_TEXT_PROVIDER", default="gemini").lower()
+    OPENAI_TEXT_MODEL = _first_env("OPENAI_TEXT_MODEL", default="gpt-4o-mini")
     OPENAI_IMAGE_MODEL = _first_env("OPENAI_IMAGE_MODEL", default="gpt-image-1")
     OPENAI_IMAGE_SIZE = _first_env("OPENAI_IMAGE_SIZE", default="1024x1536")
     GENERATED_IMAGE_DIR = _first_env("GENERATED_IMAGE_DIR", default="data/generated_images")

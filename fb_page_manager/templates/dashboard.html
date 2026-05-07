@@ -265,6 +265,12 @@
   .toast.error { border-color: #fecaca; color: #991b1b; background: #fef2f2; }
   .toast.info { border-color: #bfdbfe; color: #1e3a8a; background: #eff6ff; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: none; align-items: center; justify-content: center; z-index: 10001; }
+  .modal-overlay.show { display: flex; }
+  .modal-box { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow-y: auto; background: #fff; border-radius: 12px; border: 1px solid #dbe3ef; padding: 14px; }
+  .modal-title { font-size: 15px; font-weight: 600; color: var(--color-text-primary); margin-bottom: 10px; }
+  .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 </style>
 
 <div class="app">
@@ -342,7 +348,7 @@
             <option>Tài chính cá nhân</option>
           </select>
           <button class="fetch-btn" style="margin-top:10px;background:var(--color-background-info);color:var(--color-text-info);border:1px solid #1877F2" 
-            onclick="sendPrompt('Tôi muốn tùy chỉnh thêm prompt AI để viết caption Facebook — hãy hướng dẫn tôi')">
+            onclick="openAdvancedPromptModal()">
             Tùy chỉnh Prompt nâng cao ↗
           </button>
         </div>
@@ -365,7 +371,7 @@
           <button class="fetch-btn" id="gen-btn" onclick="generateContent()" disabled>
             Tạo Caption với AI
           </button>
-          <button class="fetch-btn" style="background:var(--color-background-secondary);color:var(--color-text-primary);border:0.5px solid var(--color-border-secondary)" onclick="sendPrompt('Hướng dẫn tôi cách tối ưu prompt để AI viết caption Facebook viral hơn')">
+          <button class="fetch-btn" id="optimize-prompt-btn" style="background:var(--color-background-secondary);color:var(--color-text-primary);border:0.5px solid var(--color-border-secondary)" onclick="optimizePrompt()">
             Tối ưu Prompt ↗
           </button>
         </div>
@@ -526,6 +532,23 @@
           </div>
         </div>
         <div class="card">
+          <div class="card-title">AI Text Model</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div>
+              <div class="label">Nhà cung cấp AI</div>
+              <select id="ai-text-provider-input"></select>
+            </div>
+            <div>
+              <div class="label">Model tạo nội dung</div>
+              <select id="ai-text-model-input"></select>
+            </div>
+            <div>
+              <div class="label">OpenAI API Key (dùng khi chọn OpenAI)</div>
+              <input type="password" placeholder="sk-proj-..." id="openai-key-input" style="width:100%;font-size:13px;padding:7px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-sans)">
+            </div>
+          </div>
+        </div>
+        <div class="card">
           <div class="card-title">NewsAPI</div>
           <div style="display:flex;flex-direction:column;gap:10px">
             <div>
@@ -611,6 +634,41 @@
 </div>
 
 <div class="toast-wrap" id="toast-wrap"></div>
+<div class="modal-overlay" id="advanced-prompt-modal">
+  <div class="modal-box">
+    <div class="modal-title">Tùy chỉnh Prompt nâng cao</div>
+    <div class="modal-grid">
+      <div>
+        <div class="label">Độ dài tối thiểu (từ)</div>
+        <input id="adv-min-words" type="number" min="50" max="500" value="150" style="width:100%;font-size:13px;padding:8px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md)">
+      </div>
+      <div>
+        <div class="label">Độ dài tối đa (từ)</div>
+        <input id="adv-max-words" type="number" min="80" max="800" value="250" style="width:100%;font-size:13px;padding:8px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md)">
+      </div>
+      <div>
+        <div class="label">Emoji tối thiểu</div>
+        <input id="adv-min-emoji" type="number" min="0" max="10" value="3" style="width:100%;font-size:13px;padding:8px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md)">
+      </div>
+      <div>
+        <div class="label">Emoji tối đa</div>
+        <input id="adv-max-emoji" type="number" min="0" max="15" value="5" style="width:100%;font-size:13px;padding:8px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md)">
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <div class="label">Câu lệnh bổ sung (mỗi dòng 1 ý)</div>
+      <textarea id="adv-extra-rules" class="prompt-textarea" style="min-height:110px" placeholder="- Tránh giọng văn phán xét&#10;- Ưu tiên ngắn gọn, mạnh ở 2 câu đầu"></textarea>
+    </div>
+    <div style="margin-top:10px">
+      <div class="label">Từ/cụm từ cần tránh (phân tách dấu phẩy)</div>
+      <input id="adv-avoid-words" type="text" placeholder="hotgirl, sốc tận óc, đọc ngay..." style="width:100%;font-size:13px;padding:8px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md)">
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeAdvancedPromptModal()" style="padding:8px 12px;font-size:13px;border-radius:8px;border:0.5px solid var(--color-border-secondary);background:none;cursor:pointer">Hủy</button>
+      <button onclick="saveAdvancedPromptSettings()" class="fetch-btn" style="width:auto;margin:0;padding:8px 14px">Lưu tùy chỉnh</button>
+    </div>
+  </div>
+</div>
 <script>
 const state = {
   articles: [],
@@ -623,6 +681,15 @@ const state = {
   sourceConfig: null,
   sourceSelections: {},
   configOptions: null,
+  promptTemplateOverride: "",
+  advancedPrompt: {
+    minWords: 150,
+    maxWords: 250,
+    minEmoji: 3,
+    maxEmoji: 5,
+    extraRules: "",
+    avoidWords: "",
+  },
 };
 
 function fillSelect(selectId, values, selectedValue = "", placeholder = "") {
@@ -686,6 +753,21 @@ function fillFacebookPages(pages, selectedPageId = "") {
   el.innerHTML = options.join("");
 }
 
+function syncAiModelOptions() {
+  const providerEl = document.getElementById("ai-text-provider-input");
+  const modelEl = document.getElementById("ai-text-model-input");
+  if (!providerEl || !modelEl) return;
+
+  const provider = String(providerEl.value || "gemini").trim().toLowerCase();
+  const options = state.configOptions || {};
+  const models = provider === "openai"
+    ? (options.openai_text_models || [])
+    : (options.gemini_models || []);
+
+  const currentModel = String(modelEl.value || "").trim();
+  fillSelect("ai-text-model-input", models, currentModel);
+}
+
 async function loadConfigOptions(accessToken = "") {
   const token = String(accessToken || "").trim();
   const qs = token ? `?access_token=${encodeURIComponent(token)}` : "";
@@ -695,6 +777,8 @@ async function loadConfigOptions(accessToken = "") {
   fillSelect("news-keyword-input", data.news_keywords || [], "", "Chọn từ khóa...");
   fillSelect("news-language-input", data.news_languages || [], "en");
   fillSelect("news-page-size-input", (data.news_page_sizes || []).map((x) => String(x)), "10");
+  fillSelect("ai-text-provider-input", data.ai_text_providers || ["gemini", "openai"], "gemini");
+  syncAiModelOptions();
   fillSelect("youtube-transcript-langs-input", data.youtube_transcript_languages || []);
   fillFacebookPages(data.facebook_pages || []);
 
@@ -806,6 +890,10 @@ function setTone(el, tone) {
   el.classList.add("active");
   state.currentTone = tone;
   if (state.selectedArticle) buildPrompt();
+}
+
+function getMainPromptTemplate() {
+  return state.promptTemplateOverride || document.getElementById("main-prompt").value || "";
 }
 
 function toggleTime(el) {
@@ -1026,6 +1114,9 @@ function buildPrompt() {
   if (!state.selectedArticle) return;
 
   const niche = document.getElementById("niche-select").value;
+  const adv = state.advancedPrompt;
+  const extraRules = String(adv.extraRules || "").trim();
+  const avoidWords = String(adv.avoidWords || "").trim();
   const prompt = `Bạn là biên tập viên mạng xã hội chuyên quản lý page Facebook về chủ đề "${niche}".
 
 NHIỆM VỤ: Viết lại bài tin tức sau thành một post Facebook hấp dẫn.
@@ -1038,14 +1129,82 @@ Tóm tắt: ${state.selectedArticle.summary || ""}
 Nguồn: ${state.selectedArticle.source}
 
 YÊU CẦU OUTPUT:
-- Dài 150-250 từ
+- Dài ${adv.minWords}-${adv.maxWords} từ
 - Câu đầu phải gây tò mò (hook)
-- Dùng 3-5 emoji phù hợp
+- Dùng ${adv.minEmoji}-${adv.maxEmoji} emoji phù hợp
 - Kết thúc bằng câu hỏi mời comment
 - KHÔNG copy nguyên văn bản gốc
-- Thêm dòng: "Nguồn: ${state.selectedArticle.source}" ở cuối`;
+- Thêm dòng: "Nguồn: ${state.selectedArticle.source}" ở cuối
+${avoidWords ? `- Tránh dùng các cụm từ: ${avoidWords}` : ""}
+${extraRules ? extraRules : ""}`;
 
+  state.promptTemplateOverride = "";
   document.getElementById("main-prompt").value = prompt;
+}
+
+function openAdvancedPromptModal() {
+  const adv = state.advancedPrompt;
+  document.getElementById("adv-min-words").value = adv.minWords;
+  document.getElementById("adv-max-words").value = adv.maxWords;
+  document.getElementById("adv-min-emoji").value = adv.minEmoji;
+  document.getElementById("adv-max-emoji").value = adv.maxEmoji;
+  document.getElementById("adv-extra-rules").value = adv.extraRules || "";
+  document.getElementById("adv-avoid-words").value = adv.avoidWords || "";
+  document.getElementById("advanced-prompt-modal").classList.add("show");
+}
+
+function closeAdvancedPromptModal() {
+  document.getElementById("advanced-prompt-modal").classList.remove("show");
+}
+
+function saveAdvancedPromptSettings() {
+  const minWords = Math.max(50, Number(document.getElementById("adv-min-words").value || 150));
+  const maxWords = Math.max(minWords, Number(document.getElementById("adv-max-words").value || 250));
+  const minEmoji = Math.max(0, Number(document.getElementById("adv-min-emoji").value || 3));
+  const maxEmoji = Math.max(minEmoji, Number(document.getElementById("adv-max-emoji").value || 5));
+
+  state.advancedPrompt = {
+    minWords,
+    maxWords,
+    minEmoji,
+    maxEmoji,
+    extraRules: String(document.getElementById("adv-extra-rules").value || "").trim(),
+    avoidWords: String(document.getElementById("adv-avoid-words").value || "").trim(),
+  };
+  closeAdvancedPromptModal();
+  if (state.selectedArticle) {
+    buildPrompt();
+  }
+  showToast("Đã lưu tùy chỉnh prompt nâng cao", "success");
+}
+
+async function optimizePrompt() {
+  if (!state.selectedArticle) {
+    showToast("Hãy chọn bài trước khi tối ưu prompt", "info");
+    return;
+  }
+  const btn = document.getElementById("optimize-prompt-btn");
+  buttonLoading(btn, true, "Đang tối ưu...", "Tối ưu Prompt ↗");
+  try {
+    const data = await apiFetch("/api/prompt/optimize", {
+      method: "POST",
+      body: JSON.stringify({
+        article: state.selectedArticle,
+        tone: state.currentTone,
+        niche: document.getElementById("niche-select").value,
+        current_prompt: getMainPromptTemplate(),
+      }),
+    });
+    state.promptTemplateOverride = String(data.prompt_template || "").trim();
+    if (state.promptTemplateOverride) {
+      document.getElementById("main-prompt").value = state.promptTemplateOverride;
+    }
+    showToast("Đã tối ưu prompt thành công", "success");
+  } catch (error) {
+    showToast(`Không thể tối ưu prompt: ${error.message}`, "error");
+  } finally {
+    buttonLoading(btn, false, "Đang tối ưu...", "Tối ưu Prompt ↗");
+  }
 }
 
 function runQuickChecks(text) {
@@ -1076,6 +1235,7 @@ async function generateContent() {
       article: state.selectedArticle,
       tone: state.currentTone,
       niche: document.getElementById("niche-select").value,
+      prompt_template: getMainPromptTemplate(),
     };
 
     const data = await apiFetch("/api/generate", {
@@ -1324,6 +1484,9 @@ async function saveConfig() {
   const pageId = document.getElementById("page-id-input").value.trim();
   const token = document.getElementById("token-input").value.trim();
   const geminiKey = document.getElementById("gemini-key-input").value.trim();
+  const openaiKey = document.getElementById("openai-key-input").value.trim();
+  const aiTextProvider = document.getElementById("ai-text-provider-input").value.trim();
+  const aiTextModel = document.getElementById("ai-text-model-input").value.trim();
   const newsApiKey = document.getElementById("news-api-key-input").value.trim();
   const newsKeyword = document.getElementById("news-keyword-input").value.trim();
   const newsLanguage = document.getElementById("news-language-input").value.trim();
@@ -1357,6 +1520,9 @@ async function saveConfig() {
         page_id: pageId,
         access_token: token,
         gemini_api_key: geminiKey,
+        openai_api_key: openaiKey,
+        ai_text_provider: aiTextProvider,
+        ai_text_model: aiTextModel,
         news_api_key: newsApiKey,
         news_keyword: newsKeyword,
         news_language: newsLanguage,
@@ -1382,12 +1548,13 @@ async function loadConfigStatus() {
     state.sourceConfig = data;
 
     const fbOk = Boolean(data.facebook?.ok);
-    const geminiOk = Boolean(data.gemini?.ok);
-    const overallOk = fbOk && geminiOk;
+    const aiOk = Boolean(data.ai?.ok);
+    const overallOk = fbOk && aiOk;
+    const aiProvider = String(data.ai_text_provider || "gemini").trim().toLowerCase();
 
     const statusText = overallOk
-      ? "Facebook + Gemini đã sẵn sàng"
-      : `Kết nối: FB ${fbOk ? "OK" : "Lỗi"} · Gemini ${geminiOk ? "OK" : "Lỗi"}`;
+      ? `Facebook + ${aiProvider} đã sẵn sàng`
+      : `Kết nối: FB ${fbOk ? "OK" : "Lỗi"} · AI ${aiOk ? "OK" : "Lỗi"}`;
 
     setHeaderStatus(overallOk, statusText);
     document.getElementById("post-now-btn").disabled = !(data.has_page_id && data.has_access_token);
@@ -1395,6 +1562,9 @@ async function loadConfigStatus() {
     setSelectValueWithFallback("news-keyword-input", data.news_keyword || "");
     setSelectValueWithFallback("news-language-input", data.news_language || "");
     setSelectValueWithFallback("news-page-size-input", String(Number(data.news_page_size || 10)));
+    setSelectValueWithFallback("ai-text-provider-input", aiProvider);
+    syncAiModelOptions();
+    setSelectValueWithFallback("ai-text-model-input", data.ai_text_model || "");
     document.getElementById("rss-urls-input").value = Array.isArray(data.rss_urls)
       ? data.rss_urls.join("\n")
       : "";
@@ -1430,6 +1600,10 @@ async function initDashboard() {
 }
 
 initDashboard();
+document.getElementById("ai-text-provider-input").addEventListener("change", () => {
+  syncAiModelOptions();
+});
+document.getElementById("niche-select").addEventListener("change", () => {
+  if (state.selectedArticle) buildPrompt();
+});
 </script>
-
-

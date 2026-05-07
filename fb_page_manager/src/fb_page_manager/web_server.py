@@ -18,7 +18,7 @@ import requests
 import google.generativeai as genai
 from flask import Flask, jsonify, render_template, request
 
-from .ai_writer import generate_caption, quality_check
+from .ai_writer import generate_caption, optimize_prompt_template, quality_check
 from .campaign_pipeline import CampaignAutomationPipeline
 from .config import DB_PATH, get_settings, reload_config
 from .crawler import fetch_newsapi, fetch_rss
@@ -178,6 +178,38 @@ def _try_gemini_status() -> Tuple[bool, str]:
     except Exception as exc:
         logger.exception("Gemini status check failed: %s", exc)
         return False, f"Gemini API lỗi: {exc}"
+
+
+def _try_openai_status() -> Tuple[bool, str]:
+    settings = get_settings()
+    if not settings.openai_api_key:
+        return False, "Thiếu OPENAI_API_KEY"
+
+    try:
+        response = requests.get(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+            timeout=15,
+        )
+        payload = response.json() if response.content else {}
+        if response.status_code >= 400:
+            message = payload.get("error", {}).get("message", f"HTTP {response.status_code}")
+            return False, f"OpenAI API lỗi: {message}"
+        models = payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(models, list) or not models:
+            return False, "OpenAI API trả danh sách model rỗng"
+        return True, "Kết nối OpenAI API OK"
+    except Exception as exc:
+        logger.exception("OpenAI status check failed: %s", exc)
+        return False, f"OpenAI API lỗi: {exc}"
+
+
+def _try_ai_status() -> Tuple[bool, str]:
+    settings = get_settings()
+    provider = str(settings.ai_text_provider or "gemini").strip().lower()
+    if provider == "openai":
+        return _try_openai_status()
+    return _try_gemini_status()
 
 
 def _parse_csv(value: str) -> List[str]:
@@ -500,6 +532,34 @@ def create_app() -> Flask:
         except Exception as exc:
             logger.exception("Generate caption failed: %s", exc)
             return _error("Không thể tạo caption", 500, str(exc))
+
+    @app.post("/api/prompt/optimize")
+    def api_prompt_optimize():
+        payload = request.get_json(silent=True) or {}
+        article = payload.get("article")
+        tone = str(payload.get("tone") or "hài hước").strip()
+        niche = str(payload.get("niche") or "Công nghệ & AI").strip()
+        current_prompt = str(payload.get("current_prompt") or "").strip()
+
+        if not isinstance(article, dict):
+            return _error("Thiếu dữ liệu article", 400)
+
+        title = str(article.get("title") or "").strip()
+        url = str(article.get("url") or "").strip()
+        if not title or not url:
+            return _error("Article cần có title và url", 400)
+
+        try:
+            optimized_prompt = optimize_prompt_template(
+                current_prompt=current_prompt,
+                article=article,
+                tone=tone,
+                niche=niche,
+            )
+            return _success({"prompt_template": optimized_prompt})
+        except Exception as exc:
+            logger.exception("Prompt optimize failed: %s", exc)
+            return _error("Không thể tối ưu prompt", 500, str(exc))
 
     @app.get("/api/queue")
     def api_queue():
@@ -849,6 +909,8 @@ def create_app() -> Flask:
         page_id = str(payload.get("page_id") or "").strip()
         access_token = str(payload.get("access_token") or "").strip()
         gemini_key = str(payload.get("gemini_api_key") or payload.get("claude_api_key") or "").strip()
+        ai_text_provider = str(payload.get("ai_text_provider") or "").strip().lower()
+        ai_text_model = str(payload.get("ai_text_model") or "").strip()
 
         has_news_api_key_field = "news_api_key" in payload
         news_api_key = str(payload.get("news_api_key") or "").strip()
@@ -888,6 +950,10 @@ def create_app() -> Flask:
             values["FB_PAGE_ACCESS_TOKEN"] = access_token
         if gemini_key:
             values["GEMINI_API_KEY"] = gemini_key
+        if ai_text_provider in {"gemini", "openai"}:
+            values["AI_TEXT_PROVIDER"] = ai_text_provider
+        if ai_text_model:
+            values["OPENAI_TEXT_MODEL"] = ai_text_model
         if has_news_api_key_field:
             values["NEWS_API_KEY"] = news_api_key
             values["NEWSAPI_KEY"] = news_api_key
@@ -1005,6 +1071,8 @@ def create_app() -> Flask:
         settings = get_settings()
         fb_ok, fb_message = _try_fb_status()
         gemini_ok, gemini_message = _try_gemini_status()
+        openai_ok, openai_message = _try_openai_status()
+        ai_ok, ai_message = _try_ai_status()
         effective_youtube_urls, effective_article_urls = resolve_source_lists(
             youtube_urls=list(settings.youtube_channel_urls),
             article_urls=list(settings.custom_news_urls),
@@ -1016,6 +1084,12 @@ def create_app() -> Flask:
                 "has_page_id": bool(settings.page_id),
                 "has_access_token": bool(settings.access_token),
                 "has_gemini_key": bool(settings.gemini_api_key),
+                "ai_text_provider": str(settings.ai_text_provider or "gemini"),
+                "ai_text_model": (
+                    str(settings.openai_text_model or "gpt-4o-mini")
+                    if str(settings.ai_text_provider or "gemini").lower() == "openai"
+                    else str(settings.gemini_model or "gemini-2.5-flash")
+                ),
                 "has_news_api_key": bool(settings.news_api_key),
                 "has_wp_config": bool(
                     settings.wp_base_url and settings.wp_username and settings.wp_app_password
@@ -1034,8 +1108,10 @@ def create_app() -> Flask:
                     "youtube_channel_urls": effective_youtube_urls,
                     "article_urls": effective_article_urls,
                 },
+                "ai": {"ok": ai_ok, "message": ai_message},
                 "facebook": {"ok": fb_ok, "message": fb_message},
                 "gemini": {"ok": gemini_ok, "message": gemini_message},
+                "openai": {"ok": openai_ok, "message": openai_message},
             }
         )
 
@@ -1078,6 +1154,17 @@ def create_app() -> Flask:
                     "world",
                 ],
                 "news_page_sizes": [5, 10, 20, 30, 50, 100],
+                "ai_text_providers": ["gemini", "openai"],
+                "gemini_models": [
+                    "gemini-2.5-flash",
+                    "gemini-2.0-flash",
+                    "gemini-1.5-flash",
+                ],
+                "openai_text_models": [
+                    "gpt-4o-mini",
+                    "gpt-4.1-mini",
+                    "gpt-4.1",
+                ],
                 "youtube_transcript_languages": [
                     "vi",
                     "en",
