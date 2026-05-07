@@ -54,10 +54,20 @@ _OPENAI_FALLBACKS = [
     "gpt-4.1-mini",
     "gpt-4.1",
 ]
+_LAST_GENERATION_WARNING: str = ""
 
 
 def _now_ts() -> float:
     return time.time()
+
+
+def _set_last_generation_warning(message: str) -> None:
+    global _LAST_GENERATION_WARNING
+    _LAST_GENERATION_WARNING = str(message or "").strip()
+
+
+def get_last_generation_warning() -> str:
+    return _LAST_GENERATION_WARNING
 
 
 def _cache_get(store: dict[str, tuple[float, str]], key: str, ttl_sec: int) -> Optional[str]:
@@ -305,6 +315,16 @@ def _active_text_provider() -> str:
     return "gemini"
 
 
+def _is_openai_quota_or_rate_error(error_text: str) -> bool:
+    text = str(error_text or "").lower()
+    return (
+        "exceeded your current quota" in text
+        or "insufficient_quota" in text
+        or "rate limit" in text
+        or "429" in text
+    )
+
+
 def _generate_text(
     *,
     prompt: str,
@@ -317,13 +337,31 @@ def _generate_text(
         api_key = str(getattr(app_config, "OPENAI_API_KEY", "") or "").strip()
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is missing.")
-        return _openai_chat_completion(
-            api_key=api_key,
-            prompt=prompt,
-            preferred_model=preferred_model,
-            temperature=temperature,
-            max_tokens=max_output_tokens,
-        )
+        try:
+            return _openai_chat_completion(
+                api_key=api_key,
+                prompt=prompt,
+                preferred_model=preferred_model,
+                temperature=temperature,
+                max_tokens=max_output_tokens,
+            )
+        except Exception as exc:
+            # If OpenAI is temporarily unavailable due to quota/rate limits,
+            # fall back to Gemini when a Gemini key exists.
+            if _is_openai_quota_or_rate_error(str(exc)):
+                gemini_key = str(getattr(app_config, "GEMINI_API_KEY", "") or "").strip()
+                if gemini_key:
+                    logger.warning(
+                        "OpenAI quota/rate-limit encountered. Falling back to Gemini."
+                    )
+                    return _generate_with_fallback_models(
+                        api_key=gemini_key,
+                        prompt=prompt,
+                        preferred_model=None,
+                        temperature=temperature,
+                        max_output_tokens=max_output_tokens,
+                    )
+            raise
 
     api_key = str(getattr(app_config, "GEMINI_API_KEY", "") or "").strip()
     if not api_key:
@@ -360,6 +398,7 @@ def generate_caption(
     url = str(article.get("url") or "").strip()
 
     if not title:
+        _set_last_generation_warning("Thiếu tiêu đề bài viết, không thể tạo caption.")
         return ""
 
     provider = _active_text_provider()
@@ -372,6 +411,9 @@ def generate_caption(
     )
     if not has_provider_key:
         logger.warning("AI key missing for provider=%s. Returning fallback caption.", provider)
+        _set_last_generation_warning(
+            f"Thiếu API key cho provider '{provider}', đã dùng caption dự phòng."
+        )
         return f"{title}\n\n{summary}\n\nNguồn: {source}\n{url}".strip()
 
     template = prompt_template or _DEFAULT_PROMPT_TEMPLATE
@@ -401,6 +443,7 @@ def generate_caption(
     )
     cached = _cache_get(_GENERATE_CACHE, cache_key, _GENERATE_CACHE_TTL_SEC)
     if cached:
+        _set_last_generation_warning("")
         return cached
 
     try:
@@ -411,9 +454,11 @@ def generate_caption(
             max_output_tokens=700,
         )
         _cache_set(_GENERATE_CACHE, cache_key, caption)
+        _set_last_generation_warning("")
         return caption
     except Exception as exc:
         logger.exception("generate_caption failed: %s", exc)
+        _set_last_generation_warning(f"AI tạo nội dung lỗi: {exc}. Đã dùng caption dự phòng.")
         return fallback_caption
 
 

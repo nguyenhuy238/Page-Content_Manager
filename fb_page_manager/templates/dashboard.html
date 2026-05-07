@@ -1246,6 +1246,9 @@ async function generateContent() {
     state.generatedCaption = data.caption || "";
     outputEl.textContent = state.generatedCaption;
     runQuickChecks(state.generatedCaption);
+    if (data.warning) {
+      showToast(data.warning, "error");
+    }
     showToast("Đã tạo caption thành công", "success");
   } catch (error) {
     outputEl.innerHTML = `<span style="color:var(--color-text-danger)">Lỗi tạo nội dung: ${error.message}</span>`;

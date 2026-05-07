@@ -18,7 +18,12 @@ import requests
 import google.generativeai as genai
 from flask import Flask, jsonify, render_template, request
 
-from .ai_writer import generate_caption, optimize_prompt_template, quality_check
+from .ai_writer import (
+    generate_caption,
+    get_last_generation_warning,
+    optimize_prompt_template,
+    quality_check,
+)
 from .campaign_pipeline import CampaignAutomationPipeline
 from .config import DB_PATH, get_settings, reload_config
 from .crawler import fetch_newsapi, fetch_rss
@@ -528,7 +533,8 @@ def create_app() -> Flask:
                 prompt_template=prompt_template if isinstance(prompt_template, str) else None,
             )
             qc = quality_check(caption)
-            return _success({"caption": caption, "quality": qc})
+            warning = get_last_generation_warning()
+            return _success({"caption": caption, "quality": qc, "warning": warning})
         except Exception as exc:
             logger.exception("Generate caption failed: %s", exc)
             return _error("Không thể tạo caption", 500, str(exc))
